@@ -42,7 +42,7 @@ fun SignUpScreen(
     var errorMessage by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
 
-    val roles = listOf("Passenger", "Staff", "Driver")
+    val roles = listOf("Passenger", "Staff")
 
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = Color.Black,

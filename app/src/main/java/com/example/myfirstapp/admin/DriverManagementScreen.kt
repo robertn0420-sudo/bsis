@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,11 +38,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.myfirstapp.DatabaseManager
 import com.example.myfirstapp.DriverRecord
+import com.example.myfirstapp.user
+import com.google.firebase.auth.FirebaseAuth
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -66,9 +72,8 @@ fun parseLicenseVisionText(
     val ltoStrictRegex = Regex("""\b([A-Z]\d{2}[- ]?\d{2}[- ]?\d{6})\b""", RegexOption.IGNORE_CASE)
     val general11CharRegex = Regex("""\b([A-Z][0-9]{10}|[A-Z0-9]{3}[- ]?[0-9]{2}[- ]?[0-9]{6})\b""", RegexOption.IGNORE_CASE)
     
-    // Flexible date regex for YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, 31 DEC 2028, etc.
-    val dateRegex = Regex(
-        """\b(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[-/.][A-Za-z]{3,9}[-/.]\d{4})\b""",
+    val datePatternRegex = Regex(
+        """\b(\d{4}[-/. \s]+\d{1,2}[-/. \s]+\d{1,2}|\d{1,2}[-/. \s]+\d{1,2}[-/. \s]+\d{4}|\d{1,2}[-/. \s]+[A-Za-z]{3,9}[-/. \s]+\d{4}|[A-Za-z]{3,9}[-/. \s]+\d{1,2}[-/. \s,]+\d{4}|\d{8})\b""",
         RegexOption.IGNORE_CASE
     )
 
@@ -90,7 +95,7 @@ fun parseLicenseVisionText(
                     val nextLine = lines[i + 1].trim()
                     val nextUpper = nextLine.uppercase()
                     if (!nextUpper.contains("REPUBLIC") && !nextUpper.contains("LICENSE") &&
-                        !nextUpper.contains("EXPIRATION") && !dateRegex.containsMatchIn(nextLine) &&
+                        !nextUpper.contains("EXPIRATION") && !datePatternRegex.containsMatchIn(nextLine) &&
                         nextLine.length >= 3) {
                         
                         val cleanedName = nextLine.replace(Regex("""^[0-9.:\-\s]+"""), "").trim()
@@ -106,101 +111,76 @@ fun parseLicenseVisionText(
         if (extractedLicenseNo == null) {
             val strictMatch = ltoStrictRegex.find(line)
             if (strictMatch != null) {
-                var rawMatch = strictMatch.value.uppercase().replace(" ", "-")
-                if (rawMatch.length == 11 && !rawMatch.contains("-")) {
-                    rawMatch = "${rawMatch.substring(0, 3)}-${rawMatch.substring(3, 5)}-${rawMatch.substring(5)}"
+                val raw = strictMatch.groupValues[1].replace(" ", "").uppercase()
+                extractedLicenseNo = if (raw.length == 11 && !raw.contains("-")) {
+                    "${raw.substring(0, 3)}-${raw.substring(3, 5)}-${raw.substring(5)}"
+                } else {
+                    raw
                 }
-                extractedLicenseNo = rawMatch
             } else {
                 val genMatch = general11CharRegex.find(line)
                 if (genMatch != null) {
-                    var rawMatch = genMatch.value.uppercase().replace(" ", "-")
-                    if (rawMatch.length == 11 && !rawMatch.contains("-")) {
-                        rawMatch = "${rawMatch.substring(0, 3)}-${rawMatch.substring(3, 5)}-${rawMatch.substring(5)}"
+                    val raw = genMatch.groupValues[1].replace(" ", "").uppercase()
+                    extractedLicenseNo = if (raw.length == 11 && !raw.contains("-")) {
+                        "${raw.substring(0, 3)}-${raw.substring(3, 5)}-${raw.substring(5)}"
+                    } else {
+                        raw
                     }
-                    extractedLicenseNo = rawMatch
                 }
             }
         }
     }
 
-    // --- 2. HIGH-PRECISION EXPIRATION DATE EXTRACTION ---
-    // PASS 1: Explicit Expiration Label check (check same line OR next line)
+    // --- 2. EXTRACT EXPIRATION DATE WITH KEYWORD PRIORITIZATION & YEAR FILTER ---
+    val expiryKeywordRegex = Regex("""(EXPIRATION|EXPIRY|EXP\b|EXPIRES|VALID UNTIL|EXP DATE|EXP\. DATE)""", RegexOption.IGNORE_CASE)
+
+    // Strategy A: Find line with Expiration Keyword
     for (i in lines.indices) {
         val line = lines[i]
-        val upper = line.uppercase()
-
-        // Expiration label keywords (e.g. "4b. EXPIRATION DATE", "EXP DATE", "VALID UNTIL", "EXPIRES")
-        val isExpiryLabel = (upper.contains("EXPIRATION") || upper.contains("EXP") ||
-                upper.contains("4B") || upper.contains("VALID UNTIL") || upper.contains("VALID THRU") ||
-                upper.contains("EXPIRES")) &&
-                !upper.contains("BIRTH") && !upper.contains("DOB") && !upper.contains("ISSUE") && !upper.contains("4A")
-
-        if (isExpiryLabel) {
-            // Check same line first
-            val sameLineMatch = dateRegex.find(line)
-            if (sameLineMatch != null) {
-                extractedExpiryDate = normalizeDateFormat(sameLineMatch.value)
-                break
-            }
-
-            // Check next line if same line has no date
-            if (i + 1 < lines.size) {
-                val nextLine = lines[i + 1].trim()
-                val nextUpper = nextLine.uppercase()
-                if (!nextUpper.contains("BIRTH") && !nextUpper.contains("DOB") && !nextUpper.contains("ISSUE")) {
-                    val nextLineMatch = dateRegex.find(nextLine)
-                    if (nextLineMatch != null) {
-                        extractedExpiryDate = normalizeDateFormat(nextLineMatch.value)
+        if (expiryKeywordRegex.containsMatchIn(line)) {
+            // Check current line for date
+            val matchInLine = datePatternRegex.find(line)
+            if (matchInLine != null) {
+                val std = standardizeDateToYYYYMMDD(matchInLine.value)
+                if (std != null) {
+                    val year = std.split("-").firstOrNull()?.toIntOrNull() ?: 0
+                    if (year >= 2020) {
+                        extractedExpiryDate = std
                         break
                     }
                 }
             }
+
+            // Check next 2 lines for date
+            for (offset in 1..2) {
+                if (i + offset < lines.size) {
+                    val nextLine = lines[i + offset]
+                    val matchInNext = datePatternRegex.find(nextLine)
+                    if (matchInNext != null) {
+                        val std = standardizeDateToYYYYMMDD(matchInNext.value)
+                        if (std != null) {
+                            val year = std.split("-").firstOrNull()?.toIntOrNull() ?: 0
+                            if (year >= 2020) {
+                                extractedExpiryDate = std
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            if (extractedExpiryDate != null) break
         }
     }
 
-    // PASS 2: Fallback if explicit label was missed/split - find future/latest date excluding Birth/Issue lines
+    // Strategy B: Fallback - Scan all dates in document and filter for year >= 2020 (ignores birth dates)
     if (extractedExpiryDate == null) {
-        val candidateDates = mutableListOf<String>()
-        for (line in lines) {
-            val upper = line.uppercase()
-            // Strictly exclude lines that are birth dates, issue dates, or LTO codes 2a/2b/3/4a
-            if (upper.contains("BIRTH") || upper.contains("DOB") || upper.contains("DATE OF BIRTH") ||
-                upper.contains("ISSUE") || upper.contains("ISSUED") || upper.contains("4A")) {
-                continue
-            }
-
-            val dateMatch = dateRegex.find(line)
-            if (dateMatch != null) {
-                val normalized = normalizeDateFormat(dateMatch.value)
-                candidateDates.add(normalized)
-            }
-        }
-
-        if (candidateDates.isNotEmpty()) {
-            val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
-            val futureOrCurrentDates = candidateDates.filter { dateStr ->
-                val yearPart = dateStr.take(4).toIntOrNull() ?: 0
-                yearPart >= (currentYear - 2) // allow recent/upcoming/future dates
-            }
-
-            extractedExpiryDate = if (futureOrCurrentDates.isNotEmpty()) {
-                futureOrCurrentDates.maxOrNull()
-            } else {
-                candidateDates.maxOrNull()
-            }
-        }
-    }
-
-    // Fallbacks for Driver Name if header line was not found
-    if (extractedName == null) {
-        for (line in lines) {
-            val upper = line.uppercase()
-            if (line.contains(",") && !upper.contains("REPUBLIC") && !upper.contains("PHILIPPINES") &&
-                !upper.contains("TRANSPORTATION") && !upper.contains("ADDRESS") && !upper.contains("OFFICE")) {
-                val clean = line.filter { it.isLetter() || it.isWhitespace() || it == ',' }.trim()
-                if (clean.length >= 5) {
-                    extractedName = formatDriverName(clean)
+        val allMatches = datePatternRegex.findAll(fullText).map { it.value.trim() }.toList()
+        for (rawDate in allMatches) {
+            val stdDate = standardizeDateToYYYYMMDD(rawDate)
+            if (stdDate != null) {
+                val year = stdDate.split("-").firstOrNull()?.toIntOrNull() ?: 0
+                if (year >= 2020) {
+                    extractedExpiryDate = stdDate
                     break
                 }
             }
@@ -210,24 +190,103 @@ fun parseLicenseVisionText(
     onScanned(extractedName, extractedLicenseNo, extractedExpiryDate, fullText)
 }
 
-/**
- * Formats "DELA CRUZ, JUAN PEDRO MARCOS" into "JUAN PEDRO MARCOS DELA CRUZ".
- */
-fun formatDriverName(rawName: String): String {
-    val clean = rawName.trim().replace(Regex("""\s+"""), " ")
-    if (clean.contains(",")) {
-        val parts = clean.split(",")
-        if (parts.size >= 2) {
-            val lastName = parts[0].trim()
-            val firstMiddle = parts[1].trim()
-            return "$firstMiddle $lastName".trim()
+fun formatDriverName(raw: String): String {
+    val clean = raw.lowercase().replace(Regex("""[^a-z\s,-]"""), " ").trim()
+    return clean.split(" ")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { word ->
+            word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        }
+}
+
+fun standardizeDateToYYYYMMDD(raw: String): String? {
+    val clean = raw.trim()
+        .replace(Regex("""\s*[-/. \s]\s*"""), "-")
+        .replace(Regex("""-+"""), "-")
+    
+    val formats = listOf(
+        "yyyy-MM-dd", "yyyy-M-d",
+        "dd-MM-yyyy", "d-M-yyyy",
+        "dd-MMM-yyyy", "d-MMM-yyyy",
+        "MMM-dd-yyyy", "MMM-d-yyyy",
+        "dd-MMMM-yyyy", "MMMM-dd-yyyy"
+    )
+    for (fmt in formats) {
+        try {
+            val sdf = SimpleDateFormat(fmt, Locale.US)
+            sdf.isLenient = false
+            val parsedDate = sdf.parse(clean)
+            if (parsedDate != null) {
+                val outSdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                return outSdf.format(parsedDate)
+            }
+        } catch (_: Exception) {}
+    }
+
+    // Check for 8-digit YYYYMMDD string (e.g. 20281231)
+    val digits = raw.replace(Regex("""\D"""), "")
+    if (digits.length == 8) {
+        val yr = digits.substring(0, 4).toIntOrNull() ?: 0
+        val mo = digits.substring(4, 6).toIntOrNull() ?: 0
+        val dy = digits.substring(6, 8).toIntOrNull() ?: 0
+        if (yr in 2020..2040 && mo in 1..12 && dy in 1..31) {
+            return String.format(Locale.US, "%04d-%02d-%02d", yr, mo, dy)
         }
     }
-    return clean
+
+    return null
 }
 
 /**
- * Scans License Image from Uri (Gallery) using Google ML Kit
+ * Validates whether the driver's license expiration date is valid or expired against today's date.
+ */
+fun validateLicenseExpiry(expiryDateStr: String): Pair<Boolean, String> {
+    if (expiryDateStr.isBlank()) return Pair(false, "License expiration date required")
+    val stdDateStr = standardizeDateToYYYYMMDD(expiryDateStr) ?: expiryDateStr.trim()
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    return try {
+        val expiryDate = sdf.parse(stdDateStr)
+        val today = Date()
+        if (expiryDate != null) {
+            if (expiryDate.after(today)) {
+                Pair(true, "License Valid until $stdDateStr")
+            } else {
+                Pair(false, "EXPIRED LICENSE ($stdDateStr)")
+            }
+        } else {
+            Pair(false, "Invalid Date Format")
+        }
+    } catch (_: Exception) {
+        Pair(true, "Expiry: $expiryDateStr")
+    }
+}
+
+/**
+ * ML Kit OCR Scanner Launcher for Bitmap from Live Camera
+ */
+fun scanLicenseBitmapWithMLKit(
+    bitmap: Bitmap,
+    onScanned: (name: String?, licenseNo: String?, expiryDate: String?, fullRawText: String) -> Unit,
+    onError: (String) -> Unit
+) {
+    try {
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val image = InputImage.fromBitmap(bitmap, 0)
+
+        recognizer.process(image)
+            .addOnSuccessListener { visionText ->
+                parseLicenseVisionText(visionText.text, onScanned)
+            }
+            .addOnFailureListener { e ->
+                onError(e.localizedMessage ?: "OCR Text Recognition failed")
+            }
+    } catch (e: Exception) {
+        onError(e.localizedMessage ?: "ML Kit initialization error")
+    }
+}
+
+/**
+ * ML Kit OCR Scanner Launcher for System Gallery Uri
  */
 fun scanLicenseWithMLKit(
     context: Context,
@@ -236,137 +295,19 @@ fun scanLicenseWithMLKit(
     onError: (String) -> Unit
 ) {
     try {
-        val inputImage = InputImage.fromFilePath(context, imageUri)
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val image = InputImage.fromFilePath(context, imageUri)
 
-        recognizer.process(inputImage)
+        recognizer.process(image)
             .addOnSuccessListener { visionText ->
                 parseLicenseVisionText(visionText.text, onScanned)
             }
             .addOnFailureListener { e ->
-                onError(e.localizedMessage ?: "Failed to scan license image with ML Kit")
+                onError(e.localizedMessage ?: "OCR Text Recognition failed")
             }
     } catch (e: Exception) {
-        onError(e.localizedMessage ?: "Error opening image for OCR")
+        onError(e.localizedMessage ?: "ML Kit initialization error")
     }
-}
-
-/**
- * Scans License Bitmap from Live Camera Capture using Google ML Kit
- */
-fun scanLicenseBitmapWithMLKit(
-    bitmap: Bitmap,
-    onScanned: (name: String?, licenseNo: String?, expiryDate: String?, fullRawText: String) -> Unit,
-    onError: (String) -> Unit
-) {
-    try {
-        val inputImage = InputImage.fromBitmap(bitmap, 0)
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-
-        recognizer.process(inputImage)
-            .addOnSuccessListener { visionText ->
-                parseLicenseVisionText(visionText.text, onScanned)
-            }
-            .addOnFailureListener { e ->
-                onError(e.localizedMessage ?: "Failed to scan camera image with ML Kit")
-            }
-    } catch (e: Exception) {
-        onError(e.localizedMessage ?: "Error processing camera bitmap for OCR")
-    }
-}
-
-/**
- * Normalizes different date formats to standard YYYY-MM-DD
- */
-fun normalizeDateFormat(rawDate: String): String {
-    val clean = rawDate.replace(".", "-").replace("/", "-").replace(",", "").trim()
-
-    val inputFormats = listOf(
-        SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH),
-        SimpleDateFormat("yyyy-M-d", Locale.ENGLISH),
-        SimpleDateFormat("dd-MMM-yyyy", Locale.ENGLISH),
-        SimpleDateFormat("dd MMM yyyy", Locale.ENGLISH),
-        SimpleDateFormat("MMM dd yyyy", Locale.ENGLISH),
-        SimpleDateFormat("dd-MM-yyyy", Locale.ENGLISH),
-        SimpleDateFormat("d-M-yyyy", Locale.ENGLISH),
-        SimpleDateFormat("MM-dd-yyyy", Locale.ENGLISH),
-        SimpleDateFormat("M-d-yyyy", Locale.ENGLISH)
-    )
-
-    for (fmt in inputFormats) {
-        try {
-            fmt.isLenient = false
-            val parsed = fmt.parse(clean)
-            if (parsed != null) {
-                return SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(parsed)
-            }
-        } catch (_: Exception) {}
-    }
-
-    val parts = clean.split("-", " ").filter { it.isNotBlank() }
-    if (parts.size == 3) {
-        val p0 = parts[0]
-        val p1 = parts[1]
-        val p2 = parts[2]
-
-        if (p0.length == 4 && p0.all { it.isDigit() }) {
-            val year = p0
-            val month = p1.padStart(2, '0')
-            val day = p2.padStart(2, '0')
-            return "$year-$month-$day"
-        } else if (p2.length == 4 && p2.all { it.isDigit() }) {
-            val year = p2
-            val v1 = p0.toIntOrNull() ?: 1
-            val v2 = p1.toIntOrNull() ?: 1
-            val (month, day) = if (v1 > 12) {
-                Pair(v2.toString().padStart(2, '0'), v1.toString().padStart(2, '0'))
-            } else if (v2 > 12) {
-                Pair(v1.toString().padStart(2, '0'), v2.toString().padStart(2, '0'))
-            } else {
-                Pair(v1.toString().padStart(2, '0'), v2.toString().padStart(2, '0'))
-            }
-            return "$year-$month-$day"
-        }
-    }
-
-    return clean
-}
-
-/**
- * Validates License Expiration Date against current system date.
- */
-fun validateLicenseExpiry(expiryDateStr: String): Pair<Boolean, String> {
-    if (expiryDateStr.isBlank()) {
-        return Pair(false, "License expiration date is required.")
-    }
-
-    val normalized = normalizeDateFormat(expiryDateStr)
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
-    sdf.isLenient = false
-
-    val parsedDate = try {
-        sdf.parse(normalized)
-    } catch (_: Exception) {
-        null
-    }
-
-    if (parsedDate == null) {
-        return Pair(false, "Invalid date format! Please use YYYY-MM-DD (e.g. 2028-12-31).")
-    }
-
-    val calendarToday = java.util.Calendar.getInstance().apply {
-        set(java.util.Calendar.HOUR_OF_DAY, 0)
-        set(java.util.Calendar.MINUTE, 0)
-        set(java.util.Calendar.SECOND, 0)
-        set(java.util.Calendar.MILLISECOND, 0)
-    }
-
-    if (parsedDate.before(calendarToday.time)) {
-        val expiredFormatted = sdf.format(parsedDate)
-        return Pair(false, "LICENSE EXPIRED! This license expired on $expiredFormatted and cannot be registered.")
-    }
-
-    return Pair(true, "License is Valid and Active")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -377,10 +318,35 @@ fun DriverManagementScreen(onBack: () -> Unit) {
     var editingDriver by remember { mutableStateOf<DriverRecord?>(null) }
     var driverToDelete by remember { mutableStateOf<DriverRecord?>(null) }
 
-    val registeredBuses = remember { mutableStateListOf("Unassigned") }
-    val busObjectsList = remember { mutableStateListOf<com.example.myfirstapp.Bus>() }
+    var searchQuery by remember { mutableStateOf("") }
     val driverList = remember { mutableStateListOf<DriverRecord>() }
 
+    // Registered Buses for Dropdown Assignment
+    val registeredBuses = remember {
+        mutableStateListOf("Unassigned", "BUS-101 (Central ➔ Airport)", "BUS-102 (Cubao ➔ PITX)", "BUS-103 (Palico ➔ Lemery)")
+    }
+
+    val busObjectsList = remember { mutableStateListOf<com.example.myfirstapp.Bus>() }
+
+    // Live Sync with Firestore Buses for assignment options
+    LaunchedEffect(Unit) {
+        DatabaseManager.listenToBuses(
+            onUpdate = { fetchedBuses ->
+                busObjectsList.clear()
+                busObjectsList.addAll(fetchedBuses)
+
+                registeredBuses.clear()
+                registeredBuses.add("Unassigned")
+                fetchedBuses.forEach { b ->
+                    val bName = if (b.busNumber.isNotBlank()) b.busNumber else "BUS-${b.busId}"
+                    val label = "$bName (${if (b.plateNumber.isNotBlank()) b.plateNumber else b.busId})"
+                    registeredBuses.add(label)
+                }
+            }
+        )
+    }
+
+    // Real-Time Live Sync with Cloud Firestore
     LaunchedEffect(Unit) {
         DatabaseManager.listenToDrivers(
             onUpdate = { fetchedDrivers ->
@@ -388,19 +354,14 @@ fun DriverManagementScreen(onBack: () -> Unit) {
                 driverList.addAll(fetchedDrivers)
             }
         )
+    }
 
-        DatabaseManager.listenToBuses(
-            onUpdate = { buses ->
-                busObjectsList.clear()
-                busObjectsList.addAll(buses)
-                registeredBuses.clear()
-                registeredBuses.add("Unassigned")
-                buses.forEach { b ->
-                    val bName = if (b.busNumber.isNotBlank()) b.busNumber else "BUS-${b.busId}"
-                    registeredBuses.add("$bName (${if (b.plateNumber.isNotBlank()) b.plateNumber else b.busId})")
-                }
-            }
-        )
+    val filteredDrivers = driverList.filter {
+        it.driverName.contains(searchQuery, ignoreCase = true) ||
+        it.licenseNumber.contains(searchQuery, ignoreCase = true) ||
+        it.driverId.contains(searchQuery, ignoreCase = true) ||
+        it.assignedBus.contains(searchQuery, ignoreCase = true) ||
+        it.email.contains(searchQuery, ignoreCase = true)
     }
 
     Scaffold(
@@ -421,6 +382,7 @@ fun DriverManagementScreen(onBack: () -> Unit) {
                 .background(AdminBg)
                 .padding(16.dp)
         ) {
+            // Header Row
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -432,12 +394,36 @@ fun DriverManagementScreen(onBack: () -> Unit) {
                         tint = AdminGreen
                     )
                 }
-                Text("Driver Management", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Driver Management", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    Text("${driverList.size} Active Drivers Registered", fontSize = 12.sp, color = Color.Gray)
+                }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            if (driverList.isEmpty()) {
+            // Search TextField
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search driver name, license, email, or ID...", color = Color.Gray) },
+                leadingIcon = { Icon(imageVector = Icons.Default.Person, contentDescription = "Search", tint = AdminGreen) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.Black,
+                    unfocusedTextColor = Color.Black,
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                    focusedBorderColor = AdminGreen,
+                    unfocusedBorderColor = Color.LightGray
+                ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            if (filteredDrivers.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -448,18 +434,16 @@ fun DriverManagementScreen(onBack: () -> Unit) {
                         Icon(imageVector = Icons.Default.Person, contentDescription = "Empty", tint = Color.Gray, modifier = Modifier.size(48.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("No Drivers Found", fontWeight = FontWeight.Bold, color = Color.Black)
-                        Text("Tap + button below to add a driver", fontSize = 12.sp, color = Color.Gray)
+                        Text("Tap + button below to add a driver record", fontSize = 12.sp, color = Color.Gray)
                     }
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(driverList) { driver ->
-                        val (isValidExpiry, _) = remember(driver.licenseExpiry) { validateLicenseExpiry(driver.licenseExpiry) }
+                    items(filteredDrivers) { driver ->
+                        val (isValidExpiry, _) = validateLicenseExpiry(driver.licenseExpiry)
 
                         Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { editingDriver = driver },
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = Color.White),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -470,22 +454,58 @@ fun DriverManagementScreen(onBack: () -> Unit) {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(driver.driverName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
-                                    Surface(
-                                        color = if (driver.employmentStatus == "On Duty") Color(0xFFE8F5E9) else Color(0xFFF5F5F5),
-                                        shape = RoundedCornerShape(6.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
                                     ) {
-                                        Text(
-                                            text = driver.employmentStatus,
-                                            fontSize = 11.sp,
-                                            color = if (driver.employmentStatus == "On Duty") AdminGreen else Color.DarkGray,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        Surface(
+                                            color = Color(0xFFE8F5E9),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.size(40.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(imageVector = Icons.Default.Person, contentDescription = null, tint = AdminGreen)
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(driver.driverName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
+                                            Text("ID: ${driver.driverId}", fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            color = if (driver.employmentStatus == "On Duty") Color(0xFFE8F5E9) else Color(0xFFF5F5F5),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = driver.employmentStatus,
+                                                fontSize = 11.sp,
+                                                color = if (driver.employmentStatus == "On Duty") AdminGreen else Color.DarkGray,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(4.dp))
+
+                                        // RED TRASH DELETE DRIVER ICON BUTTON
+                                        IconButton(
+                                            onClick = { driverToDelete = driver },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete Driver", tint = Color(0xFFC62828), modifier = Modifier.size(20.dp))
+                                        }
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
-                                Text("Driver ID: ${driver.driverId}", fontSize = 13.sp, color = Color.DarkGray)
+
+                                if (driver.email.isNotBlank()) {
+                                    Text("🔑 Login Email: ${driver.email}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AdminGreen)
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                }
+
                                 Text("Contact Number: ${driver.contactNumber}", fontSize = 13.sp, color = Color.DarkGray)
                                 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -541,38 +561,44 @@ fun DriverManagementScreen(onBack: () -> Unit) {
         }
     }
 
-    // DELETE DRIVER CONFIRMATION DIALOG
+    // DELETE DRIVER CONFIRMATION DIALOG WITH PROMINENT DELETE ICON
     if (driverToDelete != null) {
-        val targetToDelete = driverToDelete!!
+        val target = driverToDelete!!
         AlertDialog(
             onDismissRequest = { driverToDelete = null },
             containerColor = Color.White,
             titleContentColor = Color.Black,
             textContentColor = Color.Black,
             title = {
-                Text("Delete Driver", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFC62828))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = Color(0xFFC62828), modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Delete Driver Record", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFC62828))
+                }
             },
             text = {
-                Text("Are you sure you want to delete ${targetToDelete.driverName} (${targetToDelete.driverId})? This action will remove the record permanently from Cloud Firestore.", fontSize = 14.sp, color = Color.DarkGray)
+                Text("Are you sure you want to delete driver ${target.driverName} (${target.driverId})? This action will permanently remove the driver record from Cloud Firestore.", fontSize = 14.sp, color = Color.DarkGray)
             },
             confirmButton = {
                 Button(
                     onClick = {
                         DatabaseManager.deleteDriver(
-                            driverId = targetToDelete.driverId,
+                            driverId = target.driverId,
                             onSuccess = {
-                                Toast.makeText(context, "Driver ${targetToDelete.driverName} deleted!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Driver ${target.driverName} deleted!", Toast.LENGTH_SHORT).show()
                             },
                             onFailure = { e ->
                                 Toast.makeText(context, "Failed to delete: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         )
-                        driverList.remove(targetToDelete)
+                        driverList.remove(target)
                         driverToDelete = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
                 ) {
-                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Delete Driver", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -594,6 +620,10 @@ fun DriverManagementScreen(onBack: () -> Unit) {
         var licenseNumber by remember { mutableStateOf(targetDriver?.licenseNumber ?: "") }
         var licenseExpiry by remember { mutableStateOf(targetDriver?.licenseExpiry ?: "2028-12-31") }
         
+        var email by remember { mutableStateOf(targetDriver?.email ?: "") }
+        var password by remember { mutableStateOf(targetDriver?.password ?: "") }
+        var passwordVisible by remember { mutableStateOf(false) }
+
         var assignedBus by remember { mutableStateOf(targetDriver?.assignedBus ?: "Unassigned") }
         var busDropdownExpanded by remember { mutableStateOf(false) }
         var selectedStatus by remember { mutableStateOf(targetDriver?.employmentStatus ?: "On Duty") }
@@ -833,6 +863,41 @@ fun DriverManagementScreen(onBack: () -> Unit) {
                         }
                     }
 
+                    // Driver Login Account Credentials Header
+                    Text("Driver Account Login Credentials", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = AdminGreen)
+
+                    // Driver Login Email
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Driver Login Email Address", color = Color.DarkGray) },
+                        placeholder = { Text("e.g. driver.juan@transitgo.com", color = Color.Gray) },
+                        singleLine = true,
+                        colors = textFieldColors,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Driver Login Password
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Driver Login Password", color = Color.DarkGray) },
+                        placeholder = { Text("Minimum 8 characters", color = Color.Gray) },
+                        singleLine = true,
+                        colors = textFieldColors,
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            TextButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Text(if (passwordVisible) "Hide" else "Show", color = AdminGreen, fontSize = 11.sp)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = Color(0xFFEEEEEE))
+
                     // Driver Name
                     OutlinedTextField(
                         value = driverName,
@@ -976,76 +1041,140 @@ fun DriverManagementScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (driverName.isBlank()) {
-                            dialogError = "Please enter driver name"
-                            return@Button
-                        }
-
-                        // Validate License Expiration before saving
-                        val (isValid, expiryMsg) = validateLicenseExpiry(licenseExpiry)
-                        if (!isValid) {
-                            dialogError = expiryMsg
-                            return@Button
-                        }
-
-                        val newDriver = DriverRecord(
-                            driverId = autoDriverId,
-                            driverName = driverName.trim(),
-                            contactNumber = contactNumber.trim(),
-                            licenseNumber = licenseNumber.trim(),
-                            licenseExpiry = licenseExpiry.trim(),
-                            assignedBus = assignedBus,
-                            employmentStatus = selectedStatus
-                        )
-
-                        // Save or update driver directly in Cloud Firestore
-                        val existingIndex = driverList.indexOfFirst { it.driverId == autoDriverId }
-                        if (existingIndex != -1) {
-                            driverList[existingIndex] = newDriver
-                        } else {
-                            driverList.add(0, newDriver)
-                        }
-
-                        DatabaseManager.saveDriverDetails(
-                            driverId = autoDriverId,
-                            driverName = driverName.trim(),
-                            contactNumber = contactNumber.trim(),
-                            licenseNumber = licenseNumber.trim(),
-                            licenseExpiry = licenseExpiry.trim(),
-                            assignedBus = assignedBus,
-                            employmentStatus = selectedStatus
-                        )
-
-                        // Update assigned driver in Bus Management if a bus was assigned
-                        if (assignedBus != "Unassigned") {
-                            val targetBusObj = busObjectsList.find { b ->
-                                val bName = if (b.busNumber.isNotBlank()) b.busNumber else "BUS-${b.busId}"
-                                val label = "$bName (${if (b.plateNumber.isNotBlank()) b.plateNumber else b.busId})"
-                                label == assignedBus || b.busNumber.equals(assignedBus, ignoreCase = true)
-                            }
-                            if (targetBusObj != null) {
-                                targetBusObj.assignedDriver = driverName.trim()
-                                DatabaseManager.saveBus(targetBusObj)
-                            }
-                        }
-
-                        Toast.makeText(context, "Driver $driverName saved to Cloud Database!", Toast.LENGTH_SHORT).show()
-                        showAddDialog = false
-                        editingDriver = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AdminGreen)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Save Driver", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showAddDialog = false
-                    editingDriver = null
-                }) {
-                    Text("Cancel", color = Color.DarkGray, fontWeight = FontWeight.Medium)
+                    if (isEditing && targetDriver != null) {
+                        Button(
+                            onClick = {
+                                driverToDelete = targetDriver
+                                showAddDialog = false
+                                editingDriver = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFEBEE)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFC62828), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Delete", color = Color(0xFFC62828), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = {
+                            showAddDialog = false
+                            editingDriver = null
+                        }) {
+                            Text("Cancel", color = Color.DarkGray, fontWeight = FontWeight.Medium)
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        Button(
+                            onClick = {
+                                if (driverName.isBlank()) {
+                                    dialogError = "Please enter driver name"
+                                    return@Button
+                                }
+
+                                if (email.isNotBlank() && password.length < 8) {
+                                    dialogError = "Driver login password must be at least 8 characters"
+                                    return@Button
+                                }
+
+                                // Validate License Expiration before saving
+                                val (isValid, expiryMsg) = validateLicenseExpiry(licenseExpiry)
+                                if (!isValid) {
+                                    dialogError = expiryMsg
+                                    return@Button
+                                }
+
+                                val newDriver = DriverRecord(
+                                    driverId = autoDriverId,
+                                    driverName = driverName.trim(),
+                                    contactNumber = contactNumber.trim(),
+                                    licenseNumber = licenseNumber.trim(),
+                                    licenseExpiry = licenseExpiry.trim(),
+                                    assignedBus = assignedBus,
+                                    employmentStatus = selectedStatus,
+                                    email = email.trim(),
+                                    password = password
+                                )
+
+                                // Save or update driver directly in Cloud Firestore
+                                val existingIndex = driverList.indexOfFirst { it.driverId == autoDriverId }
+                                if (existingIndex != -1) {
+                                    driverList[existingIndex] = newDriver
+                                } else {
+                                    driverList.add(0, newDriver)
+                                }
+
+                                DatabaseManager.saveDriverDetails(
+                                    driverId = autoDriverId,
+                                    driverName = driverName.trim(),
+                                    contactNumber = contactNumber.trim(),
+                                    licenseNumber = licenseNumber.trim(),
+                                    licenseExpiry = licenseExpiry.trim(),
+                                    assignedBus = assignedBus,
+                                    employmentStatus = selectedStatus,
+                                    email = email.trim(),
+                                    password = password
+                                )
+
+                                // Register Driver Account in Firebase Auth & Firestore Users Collection
+                                if (email.isNotBlank() && password.isNotBlank()) {
+                                    try {
+                                        FirebaseAuth.getInstance()
+                                            .createUserWithEmailAndPassword(email.trim(), password)
+                                            .addOnCompleteListener { task ->
+                                                val uid = task.result?.user?.uid ?: autoDriverId
+                                                val driverUser = user(
+                                                    userId = uid,
+                                                    fullname = driverName.trim(),
+                                                    email = email.trim(),
+                                                    password = password,
+                                                    role = "Driver"
+                                                )
+                                                DatabaseManager.saveUser(driverUser)
+                                            }
+                                    } catch (_: Exception) {
+                                        val driverUser = user(
+                                            userId = autoDriverId,
+                                            fullname = driverName.trim(),
+                                            email = email.trim(),
+                                            password = password,
+                                            role = "Driver"
+                                        )
+                                        DatabaseManager.saveUser(driverUser)
+                                    }
+                                }
+
+                                // Update assigned driver in Bus Management if a bus was assigned
+                                if (assignedBus != "Unassigned") {
+                                    val targetBusObj = busObjectsList.find { b ->
+                                        val bName = if (b.busNumber.isNotBlank()) b.busNumber else "BUS-${b.busId}"
+                                        val label = "$bName (${if (b.plateNumber.isNotBlank()) b.plateNumber else b.busId})"
+                                        label == assignedBus || b.busNumber.equals(assignedBus, ignoreCase = true)
+                                    }
+                                    if (targetBusObj != null) {
+                                        targetBusObj.assignedDriver = driverName.trim()
+                                        DatabaseManager.saveBus(targetBusObj)
+                                    }
+                                }
+
+                                Toast.makeText(context, "Driver $driverName saved to Cloud Database!", Toast.LENGTH_SHORT).show()
+                                showAddDialog = false
+                                editingDriver = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AdminGreen)
+                        ) {
+                            Text("Save Driver", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         )

@@ -9,7 +9,9 @@ data class DriverRecord(
     var licenseNumber: String,
     var licenseExpiry: String,
     var assignedBus: String,
-    var employmentStatus: String
+    var employmentStatus: String,
+    var email: String = "",
+    var password: String = ""
 )
 
 object DatabaseManager {
@@ -160,6 +162,8 @@ object DatabaseManager {
         licenseExpiry: String,
         assignedBus: String,
         employmentStatus: String,
+        email: String = "",
+        password: String = "",
         onSuccess: () -> Unit = {},
         onFailure: (Exception) -> Unit = {}
     ) {
@@ -170,11 +174,25 @@ object DatabaseManager {
             "licenseNumber" to licenseNumber,
             "licenseExpiry" to licenseExpiry,
             "assignedBus" to assignedBus,
-            "employmentStatus" to employmentStatus
+            "employmentStatus" to employmentStatus,
+            "email" to email,
+            "password" to password
         )
         db.collection("drivers").document(driverId)
             .set(driverData)
-            .addOnSuccessListener { onSuccess() }
+            .addOnSuccessListener {
+                if (email.isNotBlank() && password.isNotBlank()) {
+                    val driverUser = user(
+                        userId = driverId,
+                        fullname = driverName,
+                        email = email,
+                        password = password,
+                        role = "Driver"
+                    )
+                    saveUser(driverUser)
+                }
+                onSuccess()
+            }
             .addOnFailureListener { e -> onFailure(e) }
     }
 
@@ -197,6 +215,8 @@ object DatabaseManager {
                     val licenseExpiry = doc.getString("licenseExpiry") ?: ""
                     val assignedBus = doc.getString("assignedBus") ?: "Unassigned"
                     val employmentStatus = doc.getString("employmentStatus") ?: "On Duty"
+                    val email = doc.getString("email") ?: ""
+                    val password = doc.getString("password") ?: ""
 
                     DriverRecord(
                         driverId = driverId,
@@ -205,7 +225,9 @@ object DatabaseManager {
                         licenseNumber = licenseNumber,
                         licenseExpiry = licenseExpiry,
                         assignedBus = assignedBus,
-                        employmentStatus = employmentStatus
+                        employmentStatus = employmentStatus,
+                        email = email,
+                        password = password
                     )
                 }
                 onUpdate(drivers)
@@ -421,10 +443,19 @@ object DatabaseManager {
                     val status = doc.getString("status") ?: "Scheduled"
                     val scheduleDate = doc.getString("scheduleDate") ?: ""
 
+                    val startP = if (routeName.contains(" ➔ ")) {
+                        routeName.split(" ➔ ")[0].replace(Regex("""^Route\s+[A-Za-z0-9-]+:\s*""", RegexOption.IGNORE_CASE), "").trim()
+                    } else "Central Terminal"
+
+                    val destP = if (routeName.contains(" ➔ ")) {
+                        routeName.split(" ➔ ")[1].trim()
+                    } else "Airport Hub"
+
                     val busObj = Bus(scheduleId, busNumber, 50, status)
                     busObj.assignedDriver = driverName
                     busObj.operator = scheduleDate
-                    val routeObj = BusRoute("R01", routeName, "Origin", "Destination")
+
+                    val routeObj = BusRoute("R01", routeName, startP, destP)
                     val scheduleObj = BusSchedule(scheduleId, busObj, routeObj, departureTime, arrivalTime)
                     scheduleObj.status = status
                     scheduleObj
@@ -442,6 +473,26 @@ object DatabaseManager {
     ) {
         db.collection("bus_schedules").document(scheduleId)
             .delete()
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener { e -> onFailure(e) }
+    }
+
+    // Update schedule status (Accepted, Rejected, In Transit, Completed) in Cloud Firestore
+    fun updateScheduleStatus(
+        scheduleId: String,
+        newStatus: String,
+        driverName: String = "",
+        onSuccess: () -> Unit = {},
+        onFailure: (Exception) -> Unit = {}
+    ) {
+        val updates = hashMapOf<String, Any>(
+            "status" to newStatus
+        )
+        if (driverName.isNotBlank()) {
+            updates["driverName"] = driverName
+        }
+        db.collection("bus_schedules").document(scheduleId)
+            .update(updates)
             .addOnSuccessListener { onSuccess() }
             .addOnFailureListener { e -> onFailure(e) }
     }

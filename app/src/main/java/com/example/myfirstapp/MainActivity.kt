@@ -168,6 +168,14 @@ fun HomeScreen(
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    if (user.role == "Driver") {
+        com.example.myfirstapp.driver.DriverScheduleScreen(
+            user = user,
+            onLogout = onLogout
+        )
+        return
+    }
+
     var dbStatus by remember { mutableStateOf("Connecting to Cloud Firestore...") }
     var isSearchingDestination by remember { mutableStateOf(false) }
     var trackedRouteName by remember { mutableStateOf<String?>(null) }

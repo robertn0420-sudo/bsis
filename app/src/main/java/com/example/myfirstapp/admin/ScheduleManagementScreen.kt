@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarToday
@@ -51,6 +52,56 @@ data class ScheduleRecord(
     var status: String,
     var dateDay: String = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).format(Date())
 )
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ScheduleTimePickerDialog(
+    title: String,
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable () -> Unit,
+    content: @Composable () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        confirmButton = confirmButton,
+        dismissButton = dismissButton,
+        title = {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = AdminGreen)
+        },
+        text = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                content()
+            }
+        },
+        containerColor = Color.White
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+fun formatTimePickerState(state: TimePickerState): String {
+    val cal = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, state.hour)
+        set(Calendar.MINUTE, state.minute)
+    }
+    return SimpleDateFormat("hh:mm a", Locale.ENGLISH).format(cal.time)
+}
+
+fun parseTimeToHourMinute(timeStr: String): Pair<Int, Int> {
+    return try {
+        val sdf = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
+        val date = sdf.parse(timeStr)
+        if (date != null) {
+            val cal = Calendar.getInstance().apply { time = date }
+            Pair(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+        } else Pair(9, 30)
+    } catch (_: Exception) {
+        Pair(9, 30)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,44 +201,9 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
         }
     }
 
-    // Combine Real Buses from Bus Management with Saved Schedules for Selected Date
-    val displayedSchedulesForSelectedDate = remember(registeredBuses.size, scheduleList.size, selectedFullDate) {
-        val result = mutableListOf<ScheduleRecord>()
-
-        if (registeredBuses.isNotEmpty()) {
-            registeredBuses.forEach { bus ->
-                val busName = if (bus.busNumber.isNotBlank()) bus.busNumber else "BUS-${bus.busId}"
-                
-                // Find custom schedule for this bus on selected date if saved in Firestore
-                val savedSchedule = scheduleList.find { s ->
-                    (s.busNumber.contains(busName) || busName.contains(s.busNumber) || s.busNumber.contains(bus.busId)) &&
-                            (s.dateDay == selectedFullDate || s.dateDay.isBlank())
-                }
-
-                if (savedSchedule != null) {
-                    result.add(savedSchedule)
-                } else {
-                    // Populate directly from Real Bus Management record
-                    result.add(
-                        ScheduleRecord(
-                            scheduleId = "SCH-" + bus.busId,
-                            busNumber = "$busName (${if (bus.plateNumber.isNotBlank()) bus.plateNumber else bus.busId})",
-                            routeName = if (bus.route.isNotBlank()) bus.route else "Unassigned Route",
-                            driverName = if (bus.assignedDriver.isNotBlank()) bus.assignedDriver else "Unassigned",
-                            departureTime = if (bus.departureTime.isNotBlank()) bus.departureTime else "08:00 AM",
-                            arrivalTime = "11:30 AM",
-                            status = if (bus.status.isNotBlank()) bus.status else "Scheduled",
-                            dateDay = selectedFullDate
-                        )
-                    )
-                }
-            }
-        } else {
-            val matches = scheduleList.filter { it.dateDay == selectedFullDate || it.dateDay.isBlank() }
-            result.addAll(matches)
-        }
-
-        result
+    // Filter Saved Schedules for Selected Date from Cloud Firestore
+    val displayedSchedulesForSelectedDate = remember(scheduleList.toList(), selectedFullDate) {
+        scheduleList.filter { it.dateDay == selectedFullDate || it.dateDay.isBlank() }
     }
 
     Scaffold(
@@ -308,7 +324,7 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Buses & Schedule Cards List fetched directly from Bus Management
+            // Buses & Schedule Cards List fetched directly from Cloud Firestore
             if (displayedSchedulesForSelectedDate.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -319,8 +335,8 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(imageVector = Icons.Default.DirectionsBus, contentDescription = "Empty", tint = Color.Gray, modifier = Modifier.size(48.dp))
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("No Buses Found in Bus Management", fontWeight = FontWeight.Bold, color = Color.Black)
-                        Text("Go to Bus Management to register buses", fontSize = 12.sp, color = Color.Gray)
+                        Text("No Schedules Found for $selectedFullDate", fontWeight = FontWeight.Bold, color = Color.Black)
+                        Text("Tap + button below to add a schedule", fontSize = 12.sp, color = Color.Gray)
                     }
                 }
             } else {
@@ -467,7 +483,7 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
         }
     }
 
-    // ADD OR EDIT SCHEDULE MODAL DIALOG
+    // ADD OR EDIT SCHEDULE MODAL DIALOG WITH MATERIAL 3 TIME PICKER DIALOGS
     if (showAddDialog || editingSchedule != null) {
         val isEditing = editingSchedule != null
         val targetSchedule = editingSchedule
@@ -477,13 +493,13 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
         val busOptions = if (registeredBuses.isNotEmpty()) {
             registeredBuses.map { b -> "${if (b.busNumber.isNotBlank()) b.busNumber else "BUS-" + b.busId} (${if (b.plateNumber.isNotBlank()) b.plateNumber else b.busId})" }
         } else {
-            listOf("No registered buses available")
+            listOf("BUS-101")
         }
 
         val routeOptions = if (registeredRoutes.isNotEmpty()) {
             registeredRoutes.map { r -> r.routeName }
         } else {
-            listOf("No registered routes available")
+            listOf("Route A01: City Terminal ➔ Airport Hub")
         }
 
         val driverOptions = if (registeredDrivers.isNotEmpty()) {
@@ -506,6 +522,15 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
         var arrivalTime by remember { mutableStateOf(targetSchedule?.arrivalTime ?: "01:30 PM") }
         var selectedStatus by remember { mutableStateOf(targetSchedule?.status ?: "Scheduled") }
 
+        var showDepartureTimePicker by remember { mutableStateOf(false) }
+        var showArrivalTimePicker by remember { mutableStateOf(false) }
+
+        val (depHour, depMin) = remember(departureTime) { parseTimeToHourMinute(departureTime) }
+        val departureTimeState = rememberTimePickerState(initialHour = depHour, initialMinute = depMin, is24Hour = false)
+
+        val (arrHour, arrMin) = remember(arrivalTime) { parseTimeToHourMinute(arrivalTime) }
+        val arrivalTimeState = rememberTimePickerState(initialHour = arrHour, initialMinute = arrMin, is24Hour = false)
+
         var dialogError by remember { mutableStateOf("") }
 
         val textFieldColors = OutlinedTextFieldDefaults.colors(
@@ -520,6 +545,58 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
         )
 
         val statusOptions = listOf("Scheduled", "Departed", "Delayed")
+
+        // DEPARTURE TIME PICKER DIALOG MODAL
+        if (showDepartureTimePicker) {
+            ScheduleTimePickerDialog(
+                title = "Select Departure Time",
+                onDismissRequest = { showDepartureTimePicker = false },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            departureTime = formatTimePickerState(departureTimeState)
+                            showDepartureTimePicker = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AdminGreen)
+                    ) {
+                        Text("Set Departure Time", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDepartureTimePicker = false }) {
+                        Text("Cancel", color = Color.DarkGray)
+                    }
+                }
+            ) {
+                TimePicker(state = departureTimeState)
+            }
+        }
+
+        // ARRIVAL TIME PICKER DIALOG MODAL
+        if (showArrivalTimePicker) {
+            ScheduleTimePickerDialog(
+                title = "Select Arrival Time",
+                onDismissRequest = { showArrivalTimePicker = false },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            arrivalTime = formatTimePickerState(arrivalTimeState)
+                            showArrivalTimePicker = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AdminGreen)
+                    ) {
+                        Text("Set Arrival Time", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showArrivalTimePicker = false }) {
+                        Text("Cancel", color = Color.DarkGray)
+                    }
+                }
+            ) {
+                TimePicker(state = arrivalTimeState)
+            }
+        }
 
         AlertDialog(
             onDismissRequest = {
@@ -683,27 +760,43 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
                         }
                     }
 
-                    // Departure Time
+                    // Interactive Departure Time Picker Field
                     OutlinedTextField(
                         value = departureTime,
                         onValueChange = { departureTime = it },
+                        readOnly = true,
                         label = { Text("Departure Time", color = Color.DarkGray) },
                         singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = { showDepartureTimePicker = true }) {
+                                Icon(imageVector = Icons.Default.AccessTime, contentDescription = "Pick Departure Time", tint = AdminGreen)
+                            }
+                        },
                         colors = textFieldColors,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDepartureTimePicker = true }
                     )
 
-                    // Arrival Time
+                    // Interactive Arrival Time Picker Field
                     OutlinedTextField(
                         value = arrivalTime,
                         onValueChange = { arrivalTime = it },
+                        readOnly = true,
                         label = { Text("Arrival Time", color = Color.DarkGray) },
                         singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = { showArrivalTimePicker = true }) {
+                                Icon(imageVector = Icons.Default.AccessTime, contentDescription = "Pick Arrival Time", tint = AdminGreen)
+                            }
+                        },
                         colors = textFieldColors,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showArrivalTimePicker = true }
                     )
 
-                    // Schedule Status
+                    // Schedule Status Selection
                     Text("Schedule Status", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color.Black)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -792,7 +885,11 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
             titleContentColor = Color.Black,
             textContentColor = Color.Black,
             title = {
-                Text("Delete Schedule", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFC62828))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = Color(0xFFC62828), modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Delete Bus Schedule", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFFC62828))
+                }
             },
             text = {
                 Text("Are you sure you want to delete Schedule ${targetToDelete.scheduleId} (${targetToDelete.busNumber})? This action will remove the record permanently from Cloud Firestore.", fontSize = 14.sp, color = Color.DarkGray)
@@ -809,12 +906,14 @@ fun ScheduleManagementScreen(onBack: () -> Unit = {}) {
                                 Toast.makeText(context, "Failed to delete: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         )
-                        scheduleList.remove(targetToDelete)
+                        scheduleList.removeIf { it.scheduleId == targetToDelete.scheduleId }
                         scheduleToDelete = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
                 ) {
-                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Delete Schedule", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

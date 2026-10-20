@@ -298,13 +298,13 @@ fun LeafletMapViewScreen(
                         ctx.textAlign = 'center';
                         ctx.fillRect(px - 90, py - 42, 180, 24);
                         ctx.fillStyle = '#FFFFFF';
-                        ctx.fillText('🏢 ' + cleanStartName, px, py - 25);
+                        ctx.fillText('🚌 ' + cleanStartName, px, py - 25);
                     } else if (showAllRoutesMode) {
                         // All Routes Tracker Mode Canvas Grid
                         ctx.fillStyle = '#116530';
                         ctx.font = 'bold 13px sans-serif';
                         ctx.textAlign = 'center';
-                        ctx.fillText('🛣️ Real-Time System Tracker Active (' + routesData.length + ' Routes)', w * 0.5, 30);
+                        ctx.fillText('🚌 Real-Time Bus Tracker Active (' + routesData.length + ' Routes)', w * 0.5, 30);
                     } else {
                         // 2-Point Route
                         var p1 = { x: w * 0.28, y: h * 0.35 };
@@ -333,7 +333,7 @@ fun LeafletMapViewScreen(
                         ctx.textAlign = 'center';
                         ctx.fillRect(p1.x - 65, p1.y - 38, 130, 22);
                         ctx.fillStyle = '#FFFFFF';
-                        ctx.fillText('📍 ' + cleanStartName, p1.x, p1.y - 23);
+                        ctx.fillText('🚌 ' + cleanStartName, p1.x, p1.y - 23);
 
                         ctx.fillStyle = '#D32F2F';
                         ctx.beginPath();
@@ -346,14 +346,14 @@ fun LeafletMapViewScreen(
                         ctx.fillStyle = '#D32F2F';
                         ctx.fillRect(p2.x - 65, p2.y + 16, 130, 22);
                         ctx.fillStyle = '#FFFFFF';
-                        ctx.fillText('🏁 ' + cleanDestName, p2.x, p2.y + 31);
+                        ctx.fillText('🚌 ' + cleanDestName, p2.x, p2.y + 31);
                     }
 
                     // Compass Rose Overlay
                     ctx.fillStyle = '#116530';
                     ctx.font = 'bold 11px sans-serif';
                     ctx.fillText('🧭 N', w - 30, 30);
-                    ctx.fillText('📍 GPS Map Active', w - 60, h - 25);
+                    ctx.fillText('🚌 Bus Tracker GPS Active', w - 75, h - 25);
                 }
 
                 drawVectorMap();
@@ -395,23 +395,23 @@ fun LeafletMapViewScreen(
 
                                 var origIcon = L.divIcon({
                                     className: 'custom-multi-orig-' + idx,
-                                    html: "<div style='background:" + rColor + ";color:white;padding:5px 10px;border-radius:14px;font-weight:bold;font-size:11px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>📍 " + route.id + ": " + route.start.split(' ')[0] + "</div>",
+                                    html: "<div style='background:" + rColor + ";color:white;padding:5px 10px;border-radius:14px;font-weight:bold;font-size:11px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🚌 " + route.id + ": " + route.start.split(' ')[0] + "</div>",
                                     iconSize: [110, 28],
                                     iconAnchor: [55, 14]
                                 });
 
                                 var destIcon = L.divIcon({
                                     className: 'custom-multi-dest-' + idx,
-                                    html: "<div style='background:#D32F2F;color:white;padding:5px 10px;border-radius:14px;font-weight:bold;font-size:11px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🏁 " + route.id + ": " + route.dest.split(' ')[0] + "</div>",
+                                    html: "<div style='background:#D32F2F;color:white;padding:5px 10px;border-radius:14px;font-weight:bold;font-size:11px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🚌 " + route.id + ": " + route.dest.split(' ')[0] + "</div>",
                                     iconSize: [110, 28],
                                     iconAnchor: [55, 14]
                                 });
 
                                 L.marker(rStartCoords, { icon: origIcon }).addTo(map)
-                                    .bindPopup("<b>Route " + route.id + " (Origin)</b><br>" + route.name + "<br><b>Location:</b> " + route.start);
+                                    .bindPopup("<b>Bus Route " + route.id + " (Origin)</b><br>" + route.name + "<br><b>Location:</b> " + route.start);
 
                                 L.marker(rDestCoords, { icon: destIcon }).addTo(map)
-                                    .bindPopup("<b>Route " + route.id + " (Destination)</b><br>" + route.name + "<br><b>Location:</b> " + route.dest);
+                                    .bindPopup("<b>Bus Route " + route.id + " (Destination)</b><br>" + route.name + "<br><b>Location:</b> " + route.dest);
 
                                 // Fetch OSRM Turn-by-Turn Driving Road Route
                                 var osrmUrl = "https://router.project-osrm.org/route/v1/driving/" +
@@ -425,7 +425,7 @@ fun LeafletMapViewScreen(
                                         if (data && data.routes && data.routes.length > 0) {
                                             L.geoJSON(data.routes[0].geometry, {
                                                 style: { color: rColor, weight: 5, opacity: 0.85, lineCap: 'round', lineJoin: 'round' }
-                                            }).addTo(map).bindPopup("<b>" + route.id + ": " + route.name + "</b>");
+                                            }).addTo(map).bindPopup("<b>Bus Route " + route.id + ": " + route.name + "</b>");
                                         } else {
                                             L.polyline([rStartCoords, rDestCoords], { color: rColor, weight: 5, opacity: 0.85 }).addTo(map);
                                         }
@@ -440,7 +440,7 @@ fun LeafletMapViewScreen(
                             }
 
                         } else if (isSingleMode) {
-                            // Single Terminal Hub Mode (1 Pin Only)
+                            // Single Terminal Hub Mode (1 Pin Only with Bus Icon)
                             var map = L.map('map-layer', { zoomControl: true }).setView(startCoords, 15);
 
                             L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -450,15 +450,15 @@ fun LeafletMapViewScreen(
 
                             var terminalIcon = L.divIcon({
                                 className: 'custom-term-icon',
-                                html: "<div style='background:#116530;color:white;padding:8px 14px;border-radius:18px;font-weight:bold;font-size:13px;border:2.5px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.4);white-space:nowrap;'>🏢 " + cleanStartName + "</div>",
+                                html: "<div style='background:#116530;color:white;padding:8px 14px;border-radius:18px;font-weight:bold;font-size:13px;border:2.5px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.4);white-space:nowrap;'>🚌 " + cleanStartName + "</div>",
                                 iconSize: [160, 36],
                                 iconAnchor: [80, 18]
                             });
 
                             L.marker(startCoords, { icon: terminalIcon }).addTo(map)
-                                .bindPopup("<b>" + cleanStartName + "</b><br><span style='color:#116530;'>Terminal Hub • " + cleanDestName + "</span>").openPopup();
+                                .bindPopup("<b>Bus Terminal: " + cleanStartName + "</b><br><span style='color:#116530;'>Active Bus Hub • " + cleanDestName + "</span>").openPopup();
                         } else {
-                            // Single Two-Point Driving Route Mode
+                            // Single Two-Point Driving Route Mode with Bus Icons
                             var map = L.map('map-layer', { zoomControl: true }).setView(startCoords, 12);
 
                             L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -468,23 +468,23 @@ fun LeafletMapViewScreen(
 
                             var blueIcon = L.divIcon({
                                 className: 'custom-orig-icon',
-                                html: "<div style='background:#1976D2;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>📍 " + cleanStartName + "</div>",
+                                html: "<div style='background:#1976D2;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🚌 " + cleanStartName + "</div>",
                                 iconSize: [140, 32],
                                 iconAnchor: [70, 16]
                             });
 
                             var redIcon = L.divIcon({
                                 className: 'custom-dest-icon',
-                                html: "<div style='background:#D32F2F;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🏁 " + cleanDestName + "</div>",
+                                html: "<div style='background:#D32F2F;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🚌 " + cleanDestName + "</div>",
                                 iconSize: [140, 32],
                                 iconAnchor: [70, 16]
                             });
 
                             L.marker(startCoords, { icon: blueIcon }).addTo(map)
-                                .bindPopup("<b>" + cleanStartName + "</b><br><span style='color:#1976D2'>Origin Terminal Point</span>");
+                                .bindPopup("<b>Bus Route Origin: " + cleanStartName + "</b>");
 
                             L.marker(destCoords, { icon: redIcon }).addTo(map)
-                                .bindPopup("<b>" + cleanDestName + "</b><br><span style='color:#D32F2F'>Final Destination Point</span>");
+                                .bindPopup("<b>Bus Route Destination: " + cleanDestName + "</b>");
 
                             // OSRM Driving Engine Route
                             var osrmUrl = "https://router.project-osrm.org/route/v1/driving/" +
@@ -567,7 +567,7 @@ fun LeafletMapViewScreen(
                 Spacer(modifier = Modifier.width(6.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (showAllRoutes) "Real-Time System Route Tracker" else if (isSingleTerminal) "Terminal Hub Map View" else "Driving Route Map",
+                        text = if (showAllRoutes) "Real-Time Bus Route Tracker" else if (isSingleTerminal) "Bus Terminal Hub Map" else "Bus Route Driving Map",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -575,7 +575,7 @@ fun LeafletMapViewScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (showAllRoutes) "Tracking ${activeRoutesList.size} Active Routes on OpenStreetMap" else if (isSingleTerminal) "Terminal: $cleanStart" else "$cleanStart ➔ $cleanDest",
+                        text = if (showAllRoutes) "Tracking ${activeRoutesList.size} Active Bus Routes on OpenStreetMap" else if (isSingleTerminal) "Terminal: $cleanStart" else "$cleanStart ➔ $cleanDest",
                         fontSize = 12.sp,
                         color = Color.White.copy(alpha = 0.85f),
                         maxLines = 1,
@@ -646,14 +646,14 @@ fun LeafletMapViewScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (showAllRoutes) "Real-Time System Tracker" else if (isSingleTerminal) "Terminal ID: $leafletId" else "Route ID: $leafletId",
+                        text = if (showAllRoutes) "Real-Time Bus Tracker" else if (isSingleTerminal) "Terminal ID: $leafletId" else "Bus Route ID: $leafletId",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         color = AdminGreen
                     )
                     Surface(color = Color(0xFFE8F5E9), shape = RoundedCornerShape(6.dp)) {
                         Text(
-                            text = if (showAllRoutes) "${activeRoutesList.size} Routes Synced" else if (isSingleTerminal) "Active Terminal Hub" else "Active & Road Synced",
+                            text = if (showAllRoutes) "${activeRoutesList.size} Bus Routes Synced" else if (isSingleTerminal) "Active Bus Terminal" else "Active & Road Synced",
                             fontSize = 11.sp,
                             color = AdminGreen,
                             fontWeight = FontWeight.Bold,
@@ -664,7 +664,7 @@ fun LeafletMapViewScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 if (showAllRoutes) {
-                    Text("All Active Routes Plotted on OpenStreetMap:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+                    Text("All Active Bus Routes Plotted on OpenStreetMap:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
                     Spacer(modifier = Modifier.height(6.dp))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -680,7 +680,7 @@ fun LeafletMapViewScreen(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(imageVector = Icons.AutoMirrored.Filled.AltRoute, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(14.dp))
+                                    Icon(imageVector = Icons.Default.DirectionsBus, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("${r.routeId}: ${r.startPoint.split(" ")[0]} ➔ ${r.destination.split(" ")[0]}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                                 }
