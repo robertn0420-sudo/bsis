@@ -49,7 +49,7 @@ fun AdminDashboardScreen(
     }
 
     if (selectedTab == "Map") {
-        LeafletMapViewScreen(leafletId = "L001", routeName = "City Terminal ➔ Airport Hub", onBack = { selectedTab = "Dashboard" })
+        LeafletMapViewScreen(showAllRoutes = true, onBack = { selectedTab = "Dashboard" })
         return
     }
 
@@ -59,7 +59,7 @@ fun AdminDashboardScreen(
             "Driver" -> DriverManagementScreen(onBack = { activeSubScreen = null })
             "Schedule" -> ScheduleManagementScreen(onBack = { activeSubScreen = null })
             "Route" -> RouteManagementScreen(onBack = { activeSubScreen = null })
-            "Tracker" -> LeafletMapViewScreen(leafletId = "L001", routeName = "Route A01: City Terminal ➔ Airport Hub", onBack = { activeSubScreen = null })
+            "Tracker" -> LeafletMapViewScreen(showAllRoutes = true, onBack = { activeSubScreen = null })
             "Terminal" -> TerminalManagementScreen(onBack = { activeSubScreen = null })
             else -> {
                 Box(

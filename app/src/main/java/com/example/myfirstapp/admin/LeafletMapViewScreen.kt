@@ -7,8 +7,11 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.LocationOn
@@ -20,9 +23,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.myfirstapp.BusRoute
+import com.example.myfirstapp.DatabaseManager
 import java.io.File
 
 @Composable
@@ -36,10 +42,59 @@ fun LeafletMapViewScreen(
     destLat: Double? = null,
     destLng: Double? = null,
     isSingleTerminal: Boolean = false,
+    showAllRoutes: Boolean = false,
     onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var isMapLoaded by remember { mutableStateOf(false) }
+
+    // Live sync all active routes from Cloud Firestore for Real-Time Tracker mode
+    val firestoreRoutes = remember { mutableStateListOf<BusRoute>() }
+
+    LaunchedEffect(showAllRoutes) {
+        if (showAllRoutes) {
+            DatabaseManager.listenToRoutes(
+                onUpdate = { fetchedRoutes ->
+                    firestoreRoutes.clear()
+                    firestoreRoutes.addAll(fetchedRoutes)
+                }
+            )
+        }
+    }
+
+    val activeRoutesList = remember(firestoreRoutes.toList(), showAllRoutes) {
+        if (showAllRoutes) {
+            if (firestoreRoutes.isNotEmpty()) {
+                firestoreRoutes.toList()
+            } else {
+                listOf(
+                    BusRoute("R-101", "Route A01: City Terminal ➔ Airport Hub", "Central Terminal - Manila", "Airport Hub - NAIA Pasay", "Active", 14.5995, 120.9842, 14.5204, 121.0122),
+                    BusRoute("R-102", "Route B02: Cubao Station ➔ PITX Express", "Cubao Bus Station", "PITX Terminal", "Active", 14.6195, 121.0511, 14.5092, 120.9917),
+                    BusRoute("R-103", "Route C03: Palico Terminal ➔ GMQ Lemery", "Palico Grand Terminal", "GMQ LEMERY BATANGAS", "Active", 14.0728, 120.6983, 13.8822, 120.9111)
+                )
+            }
+        } else emptyList()
+    }
+
+    // Build JSON Array string representing all active routes for Leaflet JS engine
+    val routesJsonData = remember(activeRoutesList) {
+        if (showAllRoutes && activeRoutesList.isNotEmpty()) {
+            val routeColors = listOf("#116530", "#1565C0", "#E65100", "#7B1FA2", "#C62828", "#00838F")
+            val sb = StringBuilder("[")
+            activeRoutesList.forEachIndexed { idx, r ->
+                val cleanRName = r.routeName.replace("'", "\\'")
+                val cleanStartName = r.startPoint.replace("'", "\\'")
+                val cleanDestName = r.destination.replace("'", "\\'")
+                val color = routeColors[idx % routeColors.size]
+
+                sb.append("{\"id\":\"${r.routeId}\",\"name\":\"$cleanRName\",\"start\":\"$cleanStartName\",\"dest\":\"$cleanDestName\",")
+                sb.append("\"sLat\":${r.startLat},\"sLng\":${r.startLng},\"dLat\":${r.destLat},\"dLng\":${r.destLng},\"color\":\"$color\"}")
+                if (idx < activeRoutesList.size - 1) sb.append(",")
+            }
+            sb.append("]")
+            sb.toString()
+        } else "[]"
+    }
 
     // Clean Start Point
     val cleanStart = remember(startPoint, routeName) {
@@ -109,19 +164,6 @@ fun LeafletMapViewScreen(
                     top: 0; left: 0; width: 100%; height: 100%;
                     z-index: 2;
                 }
-                .map-badge {
-                    position: absolute;
-                    top: 12px; left: 12px;
-                    z-index: 1000;
-                    background: rgba(255, 255, 255, 0.95);
-                    padding: 8px 14px;
-                    border-radius: 12px;
-                    box-shadow: 0 3px 10px rgba(0,0,0,0.18);
-                    font-size: 13px;
-                    font-weight: bold;
-                    color: #116530;
-                    border: 1.5px solid #116530;
-                }
                 .leaflet-popup-content {
                     font-size: 13px;
                     font-weight: bold;
@@ -131,7 +173,6 @@ fun LeafletMapViewScreen(
         </head>
         <body>
             <div id="map-wrapper">
-                <div class="map-badge">${if (isSingleTerminal) "🏢 Terminal Hub: $cleanStartJS" else "🛣️ Driving Route: $cleanStartJS ➔ $cleanDestJS"}</div>
                 <canvas id="canvas-layer"></canvas>
                 <div id="map-layer"></div>
             </div>
@@ -139,6 +180,8 @@ fun LeafletMapViewScreen(
                 var cleanStartName = "$cleanStartJS";
                 var cleanDestName = "$cleanDestJS";
                 var isSingleMode = $isSingleTerminal;
+                var showAllRoutesMode = $showAllRoutes;
+                var routesData = $routesJsonData;
 
                 var paramStartLat = $startLatJS;
                 var paramStartLng = $startLngJS;
@@ -256,6 +299,12 @@ fun LeafletMapViewScreen(
                         ctx.fillRect(px - 90, py - 42, 180, 24);
                         ctx.fillStyle = '#FFFFFF';
                         ctx.fillText('🏢 ' + cleanStartName, px, py - 25);
+                    } else if (showAllRoutesMode) {
+                        // All Routes Tracker Mode Canvas Grid
+                        ctx.fillStyle = '#116530';
+                        ctx.font = 'bold 13px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🛣️ Real-Time System Tracker Active (' + routesData.length + ' Routes)', w * 0.5, 30);
                     } else {
                         // 2-Point Route
                         var p1 = { x: w * 0.28, y: h * 0.35 };
@@ -323,7 +372,74 @@ fun LeafletMapViewScreen(
 
                         mapElem.style.zIndex = "10";
 
-                        if (isSingleMode) {
+                        if (showAllRoutesMode && routesData && routesData.length > 0) {
+                            // REAL-TIME MULTI-ROUTE TRACKER ENGINE
+                            var map = L.map('map-layer', { zoomControl: true }).setView([14.3000, 120.9500], 10);
+
+                            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                                maxZoom: 19,
+                                attribution: '© OpenStreetMap'
+                            }).addTo(map);
+
+                            var allBounds = [];
+                            var routeColors = ["#116530", "#1565C0", "#E65100", "#7B1FA2", "#C62828", "#00838F"];
+
+                            routesData.forEach(function(route, idx) {
+                                var rColor = route.color || routeColors[idx % routeColors.size];
+
+                                var rStartCoords = (route.sLat && route.sLng && route.sLat !== 0.0) ? [route.sLat, route.sLng] : getCoordsForText(route.start, false);
+                                var rDestCoords = (route.dLat && route.dLng && route.dLat !== 0.0) ? [route.dLat, route.dLng] : getCoordsForText(route.dest, true);
+
+                                allBounds.push(rStartCoords);
+                                allBounds.push(rDestCoords);
+
+                                var origIcon = L.divIcon({
+                                    className: 'custom-multi-orig-' + idx,
+                                    html: "<div style='background:" + rColor + ";color:white;padding:5px 10px;border-radius:14px;font-weight:bold;font-size:11px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>📍 " + route.id + ": " + route.start.split(' ')[0] + "</div>",
+                                    iconSize: [110, 28],
+                                    iconAnchor: [55, 14]
+                                });
+
+                                var destIcon = L.divIcon({
+                                    className: 'custom-multi-dest-' + idx,
+                                    html: "<div style='background:#D32F2F;color:white;padding:5px 10px;border-radius:14px;font-weight:bold;font-size:11px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🏁 " + route.id + ": " + route.dest.split(' ')[0] + "</div>",
+                                    iconSize: [110, 28],
+                                    iconAnchor: [55, 14]
+                                });
+
+                                L.marker(rStartCoords, { icon: origIcon }).addTo(map)
+                                    .bindPopup("<b>Route " + route.id + " (Origin)</b><br>" + route.name + "<br><b>Location:</b> " + route.start);
+
+                                L.marker(rDestCoords, { icon: destIcon }).addTo(map)
+                                    .bindPopup("<b>Route " + route.id + " (Destination)</b><br>" + route.name + "<br><b>Location:</b> " + route.dest);
+
+                                // Fetch OSRM Turn-by-Turn Driving Road Route
+                                var osrmUrl = "https://router.project-osrm.org/route/v1/driving/" +
+                                    rStartCoords[1] + "," + rStartCoords[0] + ";" +
+                                    rDestCoords[1] + "," + rDestCoords[0] +
+                                    "?overview=full&geometries=geojson";
+
+                                fetch(osrmUrl)
+                                    .then(function(res) { return res.json(); })
+                                    .then(function(data) {
+                                        if (data && data.routes && data.routes.length > 0) {
+                                            L.geoJSON(data.routes[0].geometry, {
+                                                style: { color: rColor, weight: 5, opacity: 0.85, lineCap: 'round', lineJoin: 'round' }
+                                            }).addTo(map).bindPopup("<b>" + route.id + ": " + route.name + "</b>");
+                                        } else {
+                                            L.polyline([rStartCoords, rDestCoords], { color: rColor, weight: 5, opacity: 0.85 }).addTo(map);
+                                        }
+                                    })
+                                    .catch(function(e) {
+                                        L.polyline([rStartCoords, rDestCoords], { color: rColor, weight: 5, opacity: 0.85 }).addTo(map);
+                                    });
+                            });
+
+                            if (allBounds.length > 0) {
+                                map.fitBounds(allBounds, { padding: [40, 40] });
+                            }
+
+                        } else if (isSingleMode) {
                             // Single Terminal Hub Mode (1 Pin Only)
                             var map = L.map('map-layer', { zoomControl: true }).setView(startCoords, 15);
 
@@ -342,7 +458,7 @@ fun LeafletMapViewScreen(
                             L.marker(startCoords, { icon: terminalIcon }).addTo(map)
                                 .bindPopup("<b>" + cleanStartName + "</b><br><span style='color:#116530;'>Terminal Hub • " + cleanDestName + "</span>").openPopup();
                         } else {
-                            // Two-Point Driving Route Mode
+                            // Single Two-Point Driving Route Mode
                             var map = L.map('map-layer', { zoomControl: true }).setView(startCoords, 12);
 
                             L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -386,15 +502,6 @@ fun LeafletMapViewScreen(
                                         }).addTo(map);
 
                                         map.fitBounds(drivingPolyline.getBounds(), { padding: [50, 50] });
-
-                                        var distKm = (data.routes[0].distance / 1000.0).toFixed(1);
-                                        var durationMin = Math.round(data.routes[0].duration / 60.0);
-                                        var durationText = durationMin >= 60 ? Math.floor(durationMin / 60) + "h " + (durationMin % 60) + "m" : durationMin + " mins";
-
-                                        var badgeElem = document.querySelector('.map-badge');
-                                        if (badgeElem) {
-                                            badgeElem.innerHTML = "🛣️ Real Driving Route: " + cleanStartName + " ➔ " + cleanDestName + "<br><span style='font-size:11px;color:#1976D2;'>Distance: " + distKm + " km • Est. Drive Time: " + durationText + "</span>";
-                                        }
                                     } else {
                                         drawFallbackPolyline(map, startCoords, destCoords);
                                     }
@@ -423,9 +530,9 @@ fun LeafletMapViewScreen(
     """.trimIndent()
 
     // Write HTML directly to local cache file for native WebView URL loading
-    val mapHtmlFile = remember(leafletHtmlContent, leafletId) {
+    val mapHtmlFile = remember(leafletHtmlContent, leafletId, showAllRoutes, activeRoutesList.size) {
         try {
-            val file = File(context.cacheDir, "leaflet_map_$leafletId.html")
+            val file = File(context.cacheDir, "leaflet_map_${if (showAllRoutes) "all_routes" else leafletId}.html")
             file.writeText(leafletHtmlContent, Charsets.UTF_8)
             file
         } catch (_: Exception) {
@@ -447,7 +554,8 @@ fun LeafletMapViewScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 IconButton(onClick = onBack) {
                     Icon(
@@ -456,18 +564,22 @@ fun LeafletMapViewScreen(
                         tint = Color.White
                     )
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
+                Spacer(modifier = Modifier.width(6.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isSingleTerminal) "Terminal Hub Map View" else "Leaflet Driving Route Map",
-                        fontSize = 18.sp,
+                        text = if (showAllRoutes) "Real-Time System Route Tracker" else if (isSingleTerminal) "Terminal Hub Map View" else "Driving Route Map",
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (isSingleTerminal) "Terminal: $cleanStart" else "ID: $leafletId  •  $cleanStart ➔ $cleanDest",
+                        text = if (showAllRoutes) "Tracking ${activeRoutesList.size} Active Routes on OpenStreetMap" else if (isSingleTerminal) "Terminal: $cleanStart" else "$cleanStart ➔ $cleanDest",
                         fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.85f)
+                        color = Color.White.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -534,14 +646,14 @@ fun LeafletMapViewScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isSingleTerminal) "Terminal ID: $leafletId" else "Route ID: $leafletId",
+                        text = if (showAllRoutes) "Real-Time System Tracker" else if (isSingleTerminal) "Terminal ID: $leafletId" else "Route ID: $leafletId",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         color = AdminGreen
                     )
                     Surface(color = Color(0xFFE8F5E9), shape = RoundedCornerShape(6.dp)) {
                         Text(
-                            text = if (isSingleTerminal) "Active Terminal Hub" else "Active & Road Synced",
+                            text = if (showAllRoutes) "${activeRoutesList.size} Routes Synced" else if (isSingleTerminal) "Active Terminal Hub" else "Active & Road Synced",
                             fontSize = 11.sp,
                             color = AdminGreen,
                             fontWeight = FontWeight.Bold,
@@ -551,7 +663,31 @@ fun LeafletMapViewScreen(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
 
-                if (isSingleTerminal) {
+                if (showAllRoutes) {
+                    Text("All Active Routes Plotted on OpenStreetMap:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(activeRoutesList) { r ->
+                            Surface(
+                                color = Color(0xFFF0F4F1),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, AdminGreen)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(imageVector = Icons.AutoMirrored.Filled.AltRoute, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("${r.routeId}: ${r.startPoint.split(" ")[0]} ➔ ${r.destination.split(" ")[0]}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
+                            }
+                        }
+                    }
+                } else if (isSingleTerminal) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(imageVector = Icons.Default.Store, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
