@@ -448,7 +448,7 @@ object DatabaseManager {
         onSuccess: () -> Unit = {},
         onFailure: (Exception) -> Unit = {}
     ) {
-        val sampleUser = user("U001", "Juan Dela Cruz", "juan@example.com", "pass123", "Passenger")
+        val sampleUser = user("U002", "Juan Dela Cruz", "juan@example.com", "pass123", "Passenger")
         val sampleStop = BusStop("S001", "Central Terminal", "Manila", 14.5995, 120.9842)
         val sampleRoute = BusRoute("R001", "Manila Route", "Central Manila", "City Center")
         sampleRoute.addBusStop(sampleStop)
