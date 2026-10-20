@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "724670809540",
+    "project_id": "bustop-da443",
+    "storage_bucket": "bustop-da443.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:724670809540:android:9ee6ad825e3d30687bd091",
+        "android_client_info": {
+          "package_name": "com.example.myfirstapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "724670809540-q6h2tdi5knjn610d6p8i1ovp49gcdlp1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.myfirstapp",
+            "certificate_hash": "a352a925ba684385d84cb68cf4864bf2f411e6a3"
+          }
+        },
+        {
+          "client_id": "724670809540-c747p8sju0tgtpo89l67gubo06k5t12b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABtNZOweBRZABAFxb_fGuXVSVF6vW3ENs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "724670809540-c747p8sju0tgtpo89l67gubo06k5t12b.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

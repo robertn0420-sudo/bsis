@@ -1,0 +1,11 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+    id("com.google.gms.google-services") version "4.4.2" apply false
+}
+
+val buildDirBase = file("${System.getProperty("user.home")}/.android_build_cache/${rootProject.name}")
+subprojects {
+    layout.buildDirectory.set(buildDirBase.resolve(name))
+}
