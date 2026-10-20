@@ -1,19 +1,30 @@
 package com.example.myfirstapp.admin
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
@@ -26,13 +37,143 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.myfirstapp.BusStop
 import com.example.myfirstapp.DatabaseManager
+import com.example.myfirstapp.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+
+/**
+ * Universal Terminal Image component that renders Base64 strings, local files, or fallback logo.
+ */
+@Composable
+fun TerminalImage(
+    imageUrl: String,
+    contentDescription: String,
+    modifier: Modifier = Modifier
+) {
+    val bitmap = remember(imageUrl) {
+        if (imageUrl.startsWith("data:image") && imageUrl.contains("base64,")) {
+            try {
+                val base64Data = imageUrl.substringAfter("base64,")
+                val decodedBytes = Base64.decode(base64Data, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+            } catch (_: Exception) {
+                null
+            }
+        } else if (imageUrl.startsWith("/")) {
+            try {
+                val file = File(imageUrl)
+                if (file.exists()) {
+                    BitmapFactory.decodeFile(file.absolutePath)
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+    }
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        val context = LocalContext.current
+        val imageRequest = remember(imageUrl) {
+            val model: Any = if (imageUrl.isBlank()) R.drawable.logo else imageUrl
+            ImageRequest.Builder(context)
+                .data(model)
+                .crossfade(true)
+                .fallback(R.drawable.logo)
+                .error(R.drawable.logo)
+                .placeholder(R.drawable.logo)
+                .build()
+        }
+
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = ContentScale.Crop
+        )
+    }
+}
+
+data class TerminalLocationSuggestion(
+    val title: String,
+    val subtitle: String,
+    val lat: Double? = null,
+    val lng: Double? = null
+)
+
+/**
+ * Real-time Live OpenStreetMap Geocoding Search Engine for Terminal Hubs
+ */
+suspend fun fetchLiveTerminalSuggestions(query: String): List<TerminalLocationSuggestion> {
+    if (query.trim().length < 2) return emptyList()
+    return withContext(Dispatchers.IO) {
+        try {
+            val encodedQuery = URLEncoder.encode(query.trim(), "UTF-8")
+            val urlString = "https://nominatim.openstreetmap.org/search?q=$encodedQuery&format=json&addressdetails=1&limit=8&countrycodes=ph"
+            val url = URL(urlString)
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "TransitGoApp/1.0 (Android Native App)")
+            connection.connectTimeout = 4000
+            connection.readTimeout = 4000
+
+            if (connection.responseCode == 200) {
+                val jsonString = connection.inputStream.bufferedReader().use { it.readText() }
+                val jsonArray = JSONArray(jsonString)
+
+                val results = mutableListOf<TerminalLocationSuggestion>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val displayName = obj.optString("display_name", "")
+                    val lat = obj.optDouble("lat", 0.0)
+                    val lon = obj.optDouble("lon", 0.0)
+
+                    val parts = displayName.split(",")
+                    val shortTitle = parts.firstOrNull()?.trim() ?: displayName
+                    val remainingSubtitle = if (parts.size > 1) parts.drop(1).joinToString(",").trim() else "OpenStreetMap Real Location"
+
+                    results.add(
+                        TerminalLocationSuggestion(
+                            title = shortTitle,
+                            subtitle = remainingSubtitle,
+                            lat = if (lat != 0.0) lat else null,
+                            lng = if (lon != 0.0) lon else null
+                        )
+                    )
+                }
+                results
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,26 +187,12 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
     var searchQuery by remember { mutableStateOf("") }
     val terminalList = remember { mutableStateListOf<BusStop>() }
 
-    // Pre-seeded Default Terminals if Firestore is initially empty
-    val initialDefaultTerminals = listOf(
-        BusStop("TERM-001", "Central Terminal - Manila", "Central Manila, Metro Manila", 14.5995, 120.9842, baysCount = 10, activeBays = 7, operatingHours = "24 Hours Open", status = "Active"),
-        BusStop("TERM-002", "PITX Terminal - Parañaque", "Kennedy Rd, Tambo, Parañaque, Metro Manila", 14.5092, 120.9917, baysCount = 12, activeBays = 8, operatingHours = "04:00 AM - 11:30 PM", status = "Active"),
-        BusStop("TERM-003", "Airport Hub - NAIA Pasay", "NAIA Terminal 3, Pasay, Metro Manila", 14.5204, 121.0122, baysCount = 8, activeBays = 4, operatingHours = "24 Hours Open", status = "Active"),
-        BusStop("TERM-004", "Cubao Terminal - Quezon City", "EDSA Cubao, Quezon City, Metro Manila", 14.6195, 121.0512, baysCount = 10, activeBays = 6, operatingHours = "05:00 AM - 10:00 PM", status = "Active"),
-        BusStop("TERM-005", "Palico Grand Terminal - Nasugbu", "2MXX+8G6, Tagaytay - Nasugbu Hwy, Nasugbu, Batangas", 14.0728, 120.6983, baysCount = 10, activeBays = 6, operatingHours = "04:00 AM - 10:00 PM", status = "Active")
-    )
-
     // Real-time live listener for Terminal Hubs / Bus Stops
     LaunchedEffect(Unit) {
         DatabaseManager.listenToBusStops(
             onUpdate = { fetchedStops ->
-                if (fetchedStops.isEmpty()) {
-                    // Seed initial terminals to Firestore if empty
-                    initialDefaultTerminals.forEach { DatabaseManager.saveBusStop(it) }
-                } else {
-                    terminalList.clear()
-                    terminalList.addAll(fetchedStops)
-                }
+                terminalList.clear()
+                terminalList.addAll(fetchedStops)
             }
         )
     }
@@ -74,8 +201,13 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
     if (viewingMapTerminal != null) {
         val term = viewingMapTerminal!!
         LeafletMapViewScreen(
-            leafletId = "L-${term.stopId}",
-            routeName = "${term.stopName} ➔ Regional Routes",
+            leafletId = term.stopId,
+            routeName = term.stopName,
+            startPoint = term.stopName,
+            destination = term.location,
+            startLat = term.latitude,
+            startLng = term.longitude,
+            isSingleTerminal = true,
             onBack = { viewingMapTerminal = null }
         )
         return
@@ -129,7 +261,7 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search terminal name, city, or ID...", color = Color.Gray) },
+                placeholder = { Text("Search terminal name, location, or ID...", color = Color.Gray) },
                 leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = AdminGreen) },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -165,64 +297,74 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
                     items(filteredTerminals) { terminal ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(containerColor = Color.White),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            color = Color(0xFFE8F5E9),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.size(40.dp)
+                                    // Google Maps Style Terminal Photo Thumbnail
+                                    TerminalImage(
+                                        imageUrl = terminal.imageUrl,
+                                        contentDescription = "Terminal Photo",
+                                        modifier = Modifier
+                                            .size(70.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                    )
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(imageVector = Icons.Default.Store, contentDescription = null, tint = AdminGreen)
+                                            Text(terminal.stopName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
+                                            Surface(
+                                                color = when (terminal.status) {
+                                                    "Active" -> Color(0xFFE8F5E9)
+                                                    "Maintenance" -> Color(0xFFFFF3E0)
+                                                    else -> Color(0xFFFFEBEE)
+                                                },
+                                                shape = RoundedCornerShape(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = terminal.status,
+                                                    fontSize = 11.sp,
+                                                    color = when (terminal.status) {
+                                                        "Active" -> AdminGreen
+                                                        "Maintenance" -> Color(0xFFE65100)
+                                                        else -> Color(0xFFC62828)
+                                                    },
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                             }
                                         }
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column {
-                                            Text(terminal.stopName, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Black)
-                                            Text("ID: ${terminal.stopId}", fontSize = 11.sp, color = Color.Gray)
-                                        }
-                                    }
 
-                                    Surface(
-                                        color = when (terminal.status) {
-                                            "Active" -> Color(0xFFE8F5E9)
-                                            "Maintenance" -> Color(0xFFFFF3E0)
-                                            else -> Color(0xFFFFEBEE)
-                                        },
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = terminal.status,
-                                            fontSize = 11.sp,
-                                            color = when (terminal.status) {
-                                                "Active" -> AdminGreen
-                                                "Maintenance" -> Color(0xFFE65100)
-                                                else -> Color(0xFFC62828)
-                                            },
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text("Terminal ID: ${terminal.stopId}", fontSize = 11.sp, color = Color.Gray)
+                                        
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        // Location / Destination Line
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(15.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = terminal.location,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.DarkGray
+                                            )
+                                        }
                                     }
                                 }
 
                                 Spacer(modifier = Modifier.height(10.dp))
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(terminal.location, fontSize = 13.sp, color = Color.DarkGray)
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -275,7 +417,7 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
                                     ) {
                                         Icon(imageVector = Icons.Default.Map, contentDescription = "Map", tint = AdminGreen, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("View Map", color = AdminGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text("View Route Map", color = AdminGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
 
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -346,7 +488,7 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
         )
     }
 
-    // ADD OR EDIT TERMINAL MODAL DIALOG
+    // ADD OR EDIT TERMINAL MODAL DIALOG WITH PHOTO PICKER & LIVE OPENSTREETMAP AUTOCOMPLETE
     if (showAddDialog || editingTerminal != null) {
         val isEditing = editingTerminal != null
         val target = editingTerminal
@@ -354,12 +496,39 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
         val autoStopId = remember { target?.stopId ?: ("TERM-" + (100..999).random()) }
         var stopName by remember { mutableStateOf(target?.stopName ?: "") }
         var location by remember { mutableStateOf(target?.location ?: "") }
-        var latText by remember { mutableStateOf(target?.latitude?.toString() ?: "14.5995") }
-        var lngText by remember { mutableStateOf(target?.longitude?.toString() ?: "120.9842") }
+
+        var detectedLat by remember { mutableStateOf(target?.latitude ?: 14.5995) }
+        var detectedLng by remember { mutableStateOf(target?.longitude ?: 120.9842) }
+
         var baysCountText by remember { mutableStateOf(target?.baysCount?.toString() ?: "8") }
         var activeBaysText by remember { mutableStateOf(target?.activeBays?.toString() ?: "5") }
         var operatingHours by remember { mutableStateOf(target?.operatingHours ?: "04:00 AM - 11:00 PM") }
         var selectedStatus by remember { mutableStateOf(target?.status ?: "Active") }
+
+        var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+        val currentImageUrl = target?.imageUrl ?: ""
+
+        val imagePickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+            if (uri != null) {
+                selectedImageUri = uri
+            }
+        }
+
+        var locationFocused by remember { mutableStateOf(false) }
+        var liveLocationSuggestions by remember { mutableStateOf<List<TerminalLocationSuggestion>>(emptyList()) }
+
+        // Live OpenStreetMap Geocoding Search for Terminal Location
+        LaunchedEffect(location) {
+            if (location.trim().length >= 2) {
+                delay(300)
+                val fetched = fetchLiveTerminalSuggestions(location)
+                liveLocationSuggestions = fetched.distinctBy { it.title }
+            } else {
+                liveLocationSuggestions = emptyList()
+            }
+        }
 
         var dialogError by remember { mutableStateOf("") }
 
@@ -408,7 +577,54 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
                         )
                     }
 
-                    // Terminal Name
+                    // Interactive Terminal Image / Photo Picker (Google Maps Style Photo)
+                    Text("Terminal Photo", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Color.DarkGray)
+                    Surface(
+                        color = Color(0xFFF5F8F6),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color.LightGray),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { imagePickerLauncher.launch("image/*") }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (selectedImageUri != null) {
+                                AsyncImage(
+                                    model = selectedImageUri,
+                                    contentDescription = "Picked Terminal Photo",
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                TerminalImage(
+                                    imageUrl = currentImageUrl,
+                                    contentDescription = "Current Terminal Photo",
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (selectedImageUri != null) "New Terminal Photo Selected" else "Tap to Add/Change Terminal Photo",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Text(text = "Upload Google Maps Style Photo", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Icon(imageVector = Icons.Default.AddPhotoAlternate, contentDescription = "Pick Photo", tint = AdminGreen)
+                        }
+                    }
+
+                    // Terminal Name Input
                     OutlinedTextField(
                         value = stopName,
                         onValueChange = { stopName = it },
@@ -419,16 +635,109 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    // Address / Location
-                    OutlinedTextField(
-                        value = location,
-                        onValueChange = { location = it },
-                        label = { Text("Address / City Location", color = Color.DarkGray) },
-                        placeholder = { Text("e.g. Ermita, Manila, Metro Manila", color = Color.Gray) },
-                        singleLine = true,
-                        colors = textFieldColors,
+                    // Address / City Location Input Field with Live OpenStreetMap Autocomplete Search
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Column {
+                            OutlinedTextField(
+                                value = location,
+                                onValueChange = {
+                                    location = it
+                                    locationFocused = true
+                                },
+                                label = { Text("Destination / Location Address", color = Color.DarkGray) },
+                                placeholder = { Text("Search location e.g. Nasugbu, Palico, Manila", color = Color.Gray) },
+                                leadingIcon = { Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = AdminGreen) },
+                                trailingIcon = {
+                                    if (location.isNotEmpty()) {
+                                        IconButton(onClick = { location = ""; locationFocused = false }) {
+                                            Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Color.Gray)
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                colors = textFieldColors,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // Live OpenStreetMap Autocomplete Suggestion Card
+                            if (locationFocused && liveLocationSuggestions.isNotEmpty()) {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE0E0E0))
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 220.dp)
+                                            .verticalScroll(rememberScrollState())
+                                    ) {
+                                        liveLocationSuggestions.forEach { suggestion ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        location = if (suggestion.subtitle.isNotBlank()) "${suggestion.title}, ${suggestion.subtitle}" else suggestion.title
+                                                        if (suggestion.lat != null) detectedLat = suggestion.lat
+                                                        if (suggestion.lng != null) detectedLng = suggestion.lng
+                                                        if (stopName.isBlank()) stopName = suggestion.title
+                                                        locationFocused = false
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Surface(
+                                                    color = Color(0xFFE8F5E9),
+                                                    shape = CircleShape,
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.LocationOn,
+                                                            contentDescription = null,
+                                                            tint = AdminGreen,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(suggestion.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.Black)
+                                                    Text(suggestion.subtitle, fontSize = 11.sp, color = Color.Gray)
+                                                }
+                                            }
+                                            HorizontalDivider(color = Color(0xFFF0F0F0))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Auto-Detected Coordinates Info Badge (Manual Lat/Lng Inputs Removed)
+                    Surface(
+                        color = Color(0xFFE8F5E9),
+                        shape = RoundedCornerShape(6.dp),
                         modifier = Modifier.fillMaxWidth()
-                    )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "GPS Auto-Detected: ${String.format("%.4f", detectedLat)}, ${String.format("%.4f", detectedLng)}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AdminGreen
+                            )
+                        }
+                    }
 
                     // Operating Hours
                     OutlinedTextField(
@@ -440,32 +749,6 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
                         colors = textFieldColors,
                         modifier = Modifier.fillMaxWidth()
                     )
-
-                    // Coordinates (Latitude & Longitude)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = latText,
-                            onValueChange = { latText = it },
-                            label = { Text("Latitude", color = Color.DarkGray) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            colors = textFieldColors,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        OutlinedTextField(
-                            value = lngText,
-                            onValueChange = { lngText = it },
-                            label = { Text("Longitude", color = Color.DarkGray) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            singleLine = true,
-                            colors = textFieldColors,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
 
                     // Terminal Bays (Total & Active Occupied)
                     Row(
@@ -531,21 +814,32 @@ fun TerminalManagementScreen(onBack: () -> Unit) {
                             return@Button
                         }
 
-                        val lat = latText.toDoubleOrNull() ?: 14.5995
-                        val lng = lngText.toDoubleOrNull() ?: 120.9842
                         val bCount = baysCountText.toIntOrNull() ?: 8
                         val aBays = activeBaysText.toIntOrNull() ?: 5
+
+                        // Convert picked photo to lightweight Base64 JPEG string (~25KB)
+                        val finalImg = if (selectedImageUri != null) {
+                            val b64 = convertUriToBase64(context, selectedImageUri!!)
+                            if (b64.isNotEmpty()) {
+                                b64
+                            } else {
+                                currentImageUrl
+                            }
+                        } else {
+                            currentImageUrl
+                        }
 
                         val newTerminal = BusStop(
                             stopId = autoStopId,
                             stopName = stopName.trim(),
                             location = location.trim(),
-                            latitude = lat,
-                            longitude = lng,
+                            latitude = detectedLat,
+                            longitude = detectedLng,
                             baysCount = bCount,
                             activeBays = aBays,
                             operatingHours = operatingHours.trim(),
-                            status = selectedStatus
+                            status = selectedStatus,
+                            imageUrl = finalImg
                         )
 
                         // Save or update in Firestore

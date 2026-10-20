@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Store
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,6 +35,7 @@ fun LeafletMapViewScreen(
     startLng: Double? = null,
     destLat: Double? = null,
     destLng: Double? = null,
+    isSingleTerminal: Boolean = false,
     onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -129,13 +131,14 @@ fun LeafletMapViewScreen(
         </head>
         <body>
             <div id="map-wrapper">
-                <div class="map-badge">🛣️ Driving Route: $cleanStartJS ➔ $cleanDestJS</div>
+                <div class="map-badge">${if (isSingleTerminal) "🏢 Terminal Hub: $cleanStartJS" else "🛣️ Driving Route: $cleanStartJS ➔ $cleanDestJS"}</div>
                 <canvas id="canvas-layer"></canvas>
                 <div id="map-layer"></div>
             </div>
             <script>
                 var cleanStartName = "$cleanStartJS";
                 var cleanDestName = "$cleanDestJS";
+                var isSingleMode = $isSingleTerminal;
 
                 var paramStartLat = $startLatJS;
                 var paramStartLng = $startLngJS;
@@ -177,14 +180,7 @@ fun LeafletMapViewScreen(
                     "muntinlupa": [14.4081, 121.0415],
                     "cavite": [14.4791, 120.8970],
                     "bacoor": [14.4602, 120.9631],
-                    "dasmarinas": [14.3294, 120.9367],
-                    "calamba": [14.2084, 121.1578],
-                    "santa rosa": [14.3122, 121.1114],
-                    "lipa": [13.9419, 121.1644],
-                    "angeles": [15.1667, 120.5833],
-                    "pampanga": [15.0333, 120.6833],
-                    "baguio": [16.4167, 120.5997],
-                    "lucena": [13.9333, 121.6167]
+                    "dasmarinas": [14.3294, 120.9367]
                 };
 
                 function getCoordsForText(text, isDest) {
@@ -241,75 +237,80 @@ fun LeafletMapViewScreen(
                         ctx.stroke();
                     }
 
-                    // Draw Major Highway Arteries
-                    ctx.strokeStyle = '#c1d9c7';
-                    ctx.lineWidth = 4;
-                    ctx.beginPath();
-                    ctx.moveTo(w * 0.1, h * 0.85);
-                    ctx.quadraticCurveTo(w * 0.5, h * 0.5, w * 0.9, h * 0.15);
-                    ctx.stroke();
+                    if (isSingleMode) {
+                        // Single Terminal Pin Centered
+                        var px = w * 0.5;
+                        var py = h * 0.5;
 
-                    ctx.beginPath();
-                    ctx.moveTo(w * 0.15, h * 0.2);
-                    ctx.quadraticCurveTo(w * 0.5, h * 0.5, w * 0.85, h * 0.8);
-                    ctx.stroke();
+                        ctx.fillStyle = '#116530';
+                        ctx.beginPath();
+                        ctx.arc(px, py, 16, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#FFFFFF';
+                        ctx.lineWidth = 3.5;
+                        ctx.stroke();
 
-                    // Calculate start and end node canvas positions
-                    var p1 = { x: w * 0.28, y: h * 0.35 };
-                    var p2 = { x: w * 0.72, y: h * 0.65 };
-                    var pMid = { x: (p1.x + p2.x) / 2 + 35, y: (p1.y + p2.y) / 2 - 45 };
+                        ctx.fillStyle = '#116530';
+                        ctx.font = 'bold 12px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillRect(px - 90, py - 42, 180, 24);
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillText('🏢 ' + cleanStartName, px, py - 25);
+                    } else {
+                        // 2-Point Route
+                        var p1 = { x: w * 0.28, y: h * 0.35 };
+                        var p2 = { x: w * 0.72, y: h * 0.65 };
+                        var pMid = { x: (p1.x + p2.x) / 2 + 35, y: (p1.y + p2.y) / 2 - 45 };
 
-                    // Draw Route Path Curve Line
-                    ctx.strokeStyle = '#116530';
-                    ctx.lineWidth = 6;
-                    ctx.setLineDash([10, 6]);
-                    ctx.beginPath();
-                    ctx.moveTo(p1.x, p1.y);
-                    ctx.quadraticCurveTo(pMid.x, pMid.y, p2.x, p2.y);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
+                        ctx.strokeStyle = '#116530';
+                        ctx.lineWidth = 6;
+                        ctx.setLineDash([10, 6]);
+                        ctx.beginPath();
+                        ctx.moveTo(p1.x, p1.y);
+                        ctx.quadraticCurveTo(pMid.x, pMid.y, p2.x, p2.y);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
 
-                    // Draw Origin Node Pin (Blue)
-                    ctx.fillStyle = '#1976D2';
-                    ctx.beginPath();
-                    ctx.arc(p1.x, p1.y, 14, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = '#FFFFFF';
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
+                        ctx.fillStyle = '#1976D2';
+                        ctx.beginPath();
+                        ctx.arc(p1.x, p1.y, 14, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#FFFFFF';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
 
-                    ctx.fillStyle = '#1976D2';
-                    ctx.font = 'bold 12px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.fillRect(p1.x - 65, p1.y - 38, 130, 22);
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.fillText('📍 ' + cleanStartName, p1.x, p1.y - 23);
+                        ctx.fillStyle = '#1976D2';
+                        ctx.font = 'bold 12px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillRect(p1.x - 65, p1.y - 38, 130, 22);
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillText('📍 ' + cleanStartName, p1.x, p1.y - 23);
 
-                    // Draw Destination Node Pin (Red)
-                    ctx.fillStyle = '#D32F2F';
-                    ctx.beginPath();
-                    ctx.arc(p2.x, p2.y, 14, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = '#FFFFFF';
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
+                        ctx.fillStyle = '#D32F2F';
+                        ctx.beginPath();
+                        ctx.arc(p2.x, p2.y, 14, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#FFFFFF';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
 
-                    ctx.fillStyle = '#D32F2F';
-                    ctx.fillRect(p2.x - 65, p2.y + 16, 130, 22);
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.fillText('🏁 ' + cleanDestName, p2.x, p2.y + 31);
+                        ctx.fillStyle = '#D32F2F';
+                        ctx.fillRect(p2.x - 65, p2.y + 16, 130, 22);
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillText('🏁 ' + cleanDestName, p2.x, p2.y + 31);
+                    }
 
                     // Compass Rose Overlay
                     ctx.fillStyle = '#116530';
                     ctx.font = 'bold 11px sans-serif';
                     ctx.fillText('🧭 N', w - 30, 30);
-                    ctx.fillText('📍 Real GPS Driving Mode', w - 70, h - 25);
+                    ctx.fillText('📍 GPS Map Active', w - 60, h - 25);
                 }
 
                 drawVectorMap();
                 window.addEventListener('resize', drawVectorMap);
 
-                // --- LAYER 2: Leaflet Tile Engine + OSRM Real Road Routing ---
+                // --- LAYER 2: Leaflet Tile Engine ---
                 function initLeafletEngine() {
                     if (typeof L === 'undefined') {
                         setTimeout(initLeafletEngine, 150);
@@ -320,73 +321,88 @@ fun LeafletMapViewScreen(
                         var mapElem = document.getElementById('map-layer');
                         if (!mapElem) return;
 
-                        var map = L.map('map-layer', { zoomControl: true }).setView(startCoords, 12);
+                        mapElem.style.zIndex = "10";
 
-                        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                            maxZoom: 19,
-                            attribution: '© OpenStreetMap'
-                        }).addTo(map);
+                        if (isSingleMode) {
+                            // Single Terminal Hub Mode (1 Pin Only)
+                            var map = L.map('map-layer', { zoomControl: true }).setView(startCoords, 15);
 
-                        var blueIcon = L.divIcon({
-                            className: 'custom-orig-icon',
-                            html: "<div style='background:#1976D2;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>📍 " + cleanStartName + "</div>",
-                            iconSize: [140, 32],
-                            iconAnchor: [70, 16]
-                        });
+                            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                                maxZoom: 19,
+                                attribution: '© OpenStreetMap'
+                            }).addTo(map);
 
-                        var redIcon = L.divIcon({
-                            className: 'custom-dest-icon',
-                            html: "<div style='background:#D32F2F;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🏁 " + cleanDestName + "</div>",
-                            iconSize: [140, 32],
-                            iconAnchor: [70, 16]
-                        });
-
-                        var origMarker = L.marker(startCoords, { icon: blueIcon }).addTo(map)
-                            .bindPopup("<b>" + cleanStartName + "</b><br><span style='color:#1976D2'>Origin Terminal Point</span>");
-
-                        var destMarker = L.marker(destCoords, { icon: redIcon }).addTo(map)
-                            .bindPopup("<b>" + cleanDestName + "</b><br><span style='color:#D32F2F'>Final Destination Point</span>");
-
-                        // Fetch Real Turn-by-Turn Driving Road Route from OSRM OpenStreetMap Driving Engine
-                        var osrmUrl = "https://router.project-osrm.org/route/v1/driving/" +
-                            startCoords[1] + "," + startCoords[0] + ";" +
-                            destCoords[1] + "," + destCoords[0] +
-                            "?overview=full&geometries=geojson";
-
-                        fetch(osrmUrl)
-                            .then(function(res) { return res.json(); })
-                            .then(function(data) {
-                                if (data && data.routes && data.routes.length > 0) {
-                                    var routeGeometry = data.routes[0].geometry;
-                                    var drivingPolyline = L.geoJSON(routeGeometry, {
-                                        style: {
-                                            color: '#116530',
-                                            weight: 6,
-                                            opacity: 0.9,
-                                            lineCap: 'round',
-                                            lineJoin: 'round'
-                                        }
-                                    }).addTo(map);
-
-                                    map.fitBounds(drivingPolyline.getBounds(), { padding: [50, 50] });
-
-                                    var distKm = (data.routes[0].distance / 1000.0).toFixed(1);
-                                    var durationMin = Math.round(data.routes[0].duration / 60.0);
-                                    var durationText = durationMin >= 60 ? Math.floor(durationMin / 60) + "h " + (durationMin % 60) + "m" : durationMin + " mins";
-
-                                    var badgeElem = document.querySelector('.map-badge');
-                                    if (badgeElem) {
-                                        badgeElem.innerHTML = "🛣️ Real Driving Route: " + cleanStartName + " ➔ " + cleanDestName + "<br><span style='font-size:11px;color:#1976D2;'>Distance: " + distKm + " km • Est. Drive Time: " + durationText + "</span>";
-                                    }
-                                } else {
-                                    drawFallbackPolyline(map, startCoords, destCoords);
-                                }
-                            })
-                            .catch(function(e) {
-                                drawFallbackPolyline(map, startCoords, destCoords);
+                            var terminalIcon = L.divIcon({
+                                className: 'custom-term-icon',
+                                html: "<div style='background:#116530;color:white;padding:8px 14px;border-radius:18px;font-weight:bold;font-size:13px;border:2.5px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.4);white-space:nowrap;'>🏢 " + cleanStartName + "</div>",
+                                iconSize: [160, 36],
+                                iconAnchor: [80, 18]
                             });
 
-                        mapElem.style.zIndex = "10";
+                            L.marker(startCoords, { icon: terminalIcon }).addTo(map)
+                                .bindPopup("<b>" + cleanStartName + "</b><br><span style='color:#116530;'>Terminal Hub • " + cleanDestName + "</span>").openPopup();
+                        } else {
+                            // Two-Point Driving Route Mode
+                            var map = L.map('map-layer', { zoomControl: true }).setView(startCoords, 12);
+
+                            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                                maxZoom: 19,
+                                attribution: '© OpenStreetMap'
+                            }).addTo(map);
+
+                            var blueIcon = L.divIcon({
+                                className: 'custom-orig-icon',
+                                html: "<div style='background:#1976D2;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>📍 " + cleanStartName + "</div>",
+                                iconSize: [140, 32],
+                                iconAnchor: [70, 16]
+                            });
+
+                            var redIcon = L.divIcon({
+                                className: 'custom-dest-icon',
+                                html: "<div style='background:#D32F2F;color:white;padding:6px 12px;border-radius:16px;font-weight:bold;font-size:12px;border:2px solid white;box-shadow:0 3px 8px rgba(0,0,0,0.35);white-space:nowrap;'>🏁 " + cleanDestName + "</div>",
+                                iconSize: [140, 32],
+                                iconAnchor: [70, 16]
+                            });
+
+                            L.marker(startCoords, { icon: blueIcon }).addTo(map)
+                                .bindPopup("<b>" + cleanStartName + "</b><br><span style='color:#1976D2'>Origin Terminal Point</span>");
+
+                            L.marker(destCoords, { icon: redIcon }).addTo(map)
+                                .bindPopup("<b>" + cleanDestName + "</b><br><span style='color:#D32F2F'>Final Destination Point</span>");
+
+                            // OSRM Driving Engine Route
+                            var osrmUrl = "https://router.project-osrm.org/route/v1/driving/" +
+                                startCoords[1] + "," + startCoords[0] + ";" +
+                                destCoords[1] + "," + destCoords[0] +
+                                "?overview=full&geometries=geojson";
+
+                            fetch(osrmUrl)
+                                .then(function(res) { return res.json(); })
+                                .then(function(data) {
+                                    if (data && data.routes && data.routes.length > 0) {
+                                        var routeGeometry = data.routes[0].geometry;
+                                        var drivingPolyline = L.geoJSON(routeGeometry, {
+                                            style: { color: '#116530', weight: 6, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }
+                                        }).addTo(map);
+
+                                        map.fitBounds(drivingPolyline.getBounds(), { padding: [50, 50] });
+
+                                        var distKm = (data.routes[0].distance / 1000.0).toFixed(1);
+                                        var durationMin = Math.round(data.routes[0].duration / 60.0);
+                                        var durationText = durationMin >= 60 ? Math.floor(durationMin / 60) + "h " + (durationMin % 60) + "m" : durationMin + " mins";
+
+                                        var badgeElem = document.querySelector('.map-badge');
+                                        if (badgeElem) {
+                                            badgeElem.innerHTML = "🛣️ Real Driving Route: " + cleanStartName + " ➔ " + cleanDestName + "<br><span style='font-size:11px;color:#1976D2;'>Distance: " + distKm + " km • Est. Drive Time: " + durationText + "</span>";
+                                        }
+                                    } else {
+                                        drawFallbackPolyline(map, startCoords, destCoords);
+                                    }
+                                })
+                                .catch(function(e) {
+                                    drawFallbackPolyline(map, startCoords, destCoords);
+                                });
+                        }
                     } catch(e) {
                         console.log(e);
                     }
@@ -442,8 +458,17 @@ fun LeafletMapViewScreen(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Column {
-                    Text("Leaflet Driving Route Map", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("ID: $leafletId  •  $cleanStart ➔ $cleanDest", fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+                    Text(
+                        text = if (isSingleTerminal) "Terminal Hub Map View" else "Leaflet Driving Route Map",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = if (isSingleTerminal) "Terminal: $cleanStart" else "ID: $leafletId  •  $cleanStart ➔ $cleanDest",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.85f)
+                    )
                 }
             }
         }
@@ -508,25 +533,52 @@ fun LeafletMapViewScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Route ID: $leafletId", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = AdminGreen)
+                    Text(
+                        text = if (isSingleTerminal) "Terminal ID: $leafletId" else "Route ID: $leafletId",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = AdminGreen
+                    )
                     Surface(color = Color(0xFFE8F5E9), shape = RoundedCornerShape(6.dp)) {
-                        Text("Active & Road Synced", fontSize = 11.sp, color = AdminGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                        Text(
+                            text = if (isSingleTerminal) "Active Terminal Hub" else "Active & Road Synced",
+                            fontSize = 11.sp,
+                            color = AdminGreen,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Origin: $cleanStart", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+
+                if (isSingleTerminal) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Store, contentDescription = null, tint = AdminGreen, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Terminal: $cleanStart", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Location: $cleanDest", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.DarkGray)
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Origin: $cleanStart", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.DirectionsBus, contentDescription = null, tint = Color(0xFFD32F2F), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Destination: $cleanDest", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(imageVector = Icons.Default.DirectionsBus, contentDescription = null, tint = Color(0xFFD32F2F), modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Destination: $cleanDest", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                }
+
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Map Engine: OpenStreetMap + OSRM Real Road Driving Routing", fontSize = 11.sp, color = Color.Gray)
+                Text("Map Engine: OpenStreetMap + Leaflet.js Interactive Engine", fontSize = 11.sp, color = Color.Gray)
             }
         }
     }

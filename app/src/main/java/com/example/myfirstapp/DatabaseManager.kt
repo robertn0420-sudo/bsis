@@ -240,7 +240,8 @@ object DatabaseManager {
             "baysCount" to stop.baysCount,
             "activeBays" to stop.activeBays,
             "operatingHours" to stop.operatingHours,
-            "status" to stop.status
+            "status" to stop.status,
+            "imageUrl" to stop.imageUrl
         )
         db.collection("bus_stops").document(stop.stopId)
             .set(stopData)
@@ -269,6 +270,7 @@ object DatabaseManager {
                     val activeBays = (doc.getLong("activeBays") ?: 5L).toInt()
                     val operatingHours = doc.getString("operatingHours") ?: "04:00 AM - 11:00 PM"
                     val status = doc.getString("status") ?: "Active"
+                    val imageUrl = doc.getString("imageUrl") ?: ""
 
                     BusStop(
                         stopId = stopId,
@@ -279,7 +281,8 @@ object DatabaseManager {
                         baysCount = baysCount,
                         activeBays = activeBays,
                         operatingHours = operatingHours,
-                        status = status
+                        status = status,
+                        imageUrl = imageUrl
                     )
                 }
                 onUpdate(stops)

@@ -9,7 +9,8 @@ class BusStop(
     var baysCount: Int = 8,
     var activeBays: Int = 5,
     var operatingHours: String = "04:00 AM - 11:00 PM",
-    var status: String = "Active"
+    var status: String = "Active",
+    var imageUrl: String = ""
 ) {
     fun displayInfo(){
         println("Stop ID: $stopId")

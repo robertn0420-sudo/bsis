@@ -128,18 +128,14 @@ fun RouteManagementScreen(onBack: () -> Unit = {}) {
         )
     }
 
-    val routeList = remember { mutableStateListOf<BusRoute>().apply { addAll(initialDefaultRoutes) } }
+    val routeList = remember { mutableStateListOf<BusRoute>() }
 
     // Live sync directly with Cloud Firestore database
     LaunchedEffect(Unit) {
         DatabaseManager.listenToRoutes(
             onUpdate = { fetchedRoutes ->
-                if (fetchedRoutes.isNotEmpty()) {
-                    routeList.clear()
-                    routeList.addAll(fetchedRoutes)
-                } else {
-                    initialDefaultRoutes.forEach { DatabaseManager.saveBusRoute(it) }
-                }
+                routeList.clear()
+                routeList.addAll(fetchedRoutes)
             }
         )
     }
@@ -194,8 +190,23 @@ fun RouteManagementScreen(onBack: () -> Unit = {}) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(routeList) { route ->
+            if (routeList.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.AltRoute, contentDescription = "Empty", tint = Color.Gray, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("No Routes Found", fontWeight = FontWeight.Bold, color = Color.Black)
+                        Text("Tap + button below to create a route", fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(routeList) { route ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -942,4 +953,5 @@ fun RouteManagementScreen(onBack: () -> Unit = {}) {
             }
         )
     }
+}
 }
